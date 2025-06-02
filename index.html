@@ -6,6 +6,9 @@
     <title>Logistics Task Board</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.1/dist/tesseract.min.js"></script>
+    <!-- 引入 PaddleOCR.js CDN -->
+    <script src="https://unpkg.com/paddleocr/dist/paddle-ocr.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -477,7 +480,10 @@
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-input-container" style="display:flex;flex-direction:column;align-items:center;gap:16px;">
             <textarea class="chat-input" id="command-input" placeholder="Please enter a command, e.g.: Create 2 pallets Pickup to NSW 25/12" style="width:100%;height:100px;resize:vertical;font-size:15px;padding:12px 10px;box-sizing:border-box;"></textarea>
-            <button id="addPdfGlobalBtn" style="background:#F7941D;color:#fff;border:none;padding:12px 0;border-radius:5px;font-size:16px;cursor:pointer;width:100%;max-width:100%;">Add PDF</button>
+            <div style="display:flex;flex-direction:row;gap:16px;justify-content:center;width:100%;">
+                <button id="addPdfGlobalBtn" style="background:#F7941D;color:#fff;border:none;padding:12px 0;border-radius:5px;font-size:16px;cursor:pointer;width:180px;max-width:180px;">Add PDF</button>
+                <button id="identifyImageBtn" style="background:#F7941D;color:#fff;border:none;padding:12px 0;border-radius:5px;font-size:16px;cursor:pointer;width:180px;max-width:180px;">Identify Image</button>
+            </div>
             <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;" />
         </div>
     </div>
@@ -632,6 +638,9 @@
             const mm = String(now.getMonth() + 1).padStart(2, '0');
             return `${dd}/${mm}`;
         }
+
+        // 在外部声明全局finishEditing变量
+        let currentFinishEditing = null;
 
         // 自然语言处理器
         class ChatAssistant {
@@ -831,105 +840,63 @@
 
         // 集成到聊天框
         document.getElementById('command-input').addEventListener('keypress', async (e) => {
-            if (e.key === 'Enter') {
-                const command = e.target.value.trim();
-                if (!command) return;
-                
-                e.target.value = '';
-                showChatMessage(command, 'user');
-                showChatMessage('Processing...', 'loading');
-                
-                try {
-                    console.log('Processing command:', command);
-                    const result = await ChatAssistant.parseCommand(command);
-                    console.log('Command result:', result);
+            if (e.key === 'Enter' && !e.shiftKey) { // 支持多行输入，Shift+Enter换行
+                e.preventDefault();
+                const input = e.target.value.trim();
+                if (!input) return;
 
-                    if (result.error) {
-                        throw new Error(result.error);
-                    }
-                    
-                    // 执行指令
-                    if (result.action === 'CREATE') {
-                        // 自动补全status
-                        if (!result.status) result.status = 'Pending';
-                        // 只要有id就允许录入，其他字段允许为空
-                        const userId = extractIdFromInput(command);
-                        // 如果没有日期，补充为今天
-                        let parsedDate = result.date ? parseNaturalDate(result.date) : '';
-                        if (!parsedDate) parsedDate = getTodayDateStr();
-                        const newTask = {
-                            id: userId || result.id || generateUniqueId(),
-                            status: result.status,
-                            pallets: result.pallets || '',
-                            type: result.type || '',
-                            deliveryScope: result.deliveryScope || 'Local Delivery',
-                            date: parsedDate
-                        };
-                        const tasks = safeGetTasks();
-                        if (newTask.id) {
-                            tasks.push(newTask);
-                            localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
-                            triggerDataUpdate();
-                            if (validateTask(newTask)) {
-                                showChatMessage('Task created successfully!', 'assistant');
+                e.target.value = '';
+                showChatMessage(input, 'user');
+                showChatMessage('Processing...', 'loading');
+
+                // 按行分割，过滤空行
+                const lines = input.split('\n').map(line => line.trim()).filter(line => line);
+
+                let successCount = 0;
+                let failCount = 0;
+                for (const line of lines) {
+                    try {
+                        const result = await ChatAssistant.parseCommand(line);
+                        if (result.error) throw new Error(result.error);
+
+                        if (result.action === 'CREATE') {
+                            if (!result.status) result.status = 'Pending';
+                            const userId = extractIdFromInput(line);
+                            let parsedDate = result.date ? parseNaturalDate(result.date) : '';
+                            if (!parsedDate) parsedDate = getTodayDateStr();
+                            const newTask = {
+                                id: userId || result.id || generateUniqueId(),
+                                status: result.status,
+                                pallets: result.pallets || '',
+                                type: result.type || '',
+                                deliveryScope: result.deliveryScope || 'Local Delivery',
+                                date: parsedDate
+                            };
+                            const tasks = safeGetTasks();
+                            if (newTask.id) {
+                                tasks.push(newTask);
+                                localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
+                                triggerDataUpdate();
+                                if (validateTask(newTask)) {
+                                    showChatMessage(`任务创建成功: ${newTask.id}`, 'assistant');
+                                } else {
+                                    showChatMessage(`部分字段缺失，已记录可识别信息: ${newTask.id}`, 'assistant');
+                                }
+                                successCount++;
                             } else {
-                                showChatMessage('Some fields are missing, but the recognizable information has been recorded.', 'assistant');
+                                throw new Error('缺少关键字段，未能创建');
                             }
                         } else {
-                            throw new Error('Data validation failed, missing key fields');
+                            // 其它类型指令可按需扩展
+                            showChatMessage(`暂不支持批量处理该类型指令: ${line}`, 'error');
+                            failCount++;
                         }
-                    } else if (result.action === 'UPDATE_STATUS') {
-                        if (!result.id || !result.status) {
-                            throw new Error('Missing required fields for UPDATE_STATUS action');
-                        }
-                        
-                        if (updateTask(result.id, { status: result.status })) {
-                            showChatMessage('Status updated successfully!', 'assistant');
-                        } else {
-                            throw new Error('Update failed');
-                        }
-                    } else if (result.action === 'UPDATE') {
-                        // 修改任务内容
-                        if (!result.id) throw new Error('缺少字段: id');
-                        const updateData = {};
-                        if (result.pallets) updateData.pallets = result.pallets;
-                        if (result.type) updateData.type = result.type;
-                        if (result.deliveryScope) updateData.deliveryScope = result.deliveryScope;
-                        if (result.date) updateData.date = parseNaturalDate(result.date);
-                        if (Object.keys(updateData).length === 0) throw new Error('未指定要修改的内容');
-                        if (updateTask(result.id, updateData)) {
-                            showChatMessage('Task updated successfully!', 'assistant');
-                        } else {
-                            throw new Error('Update failed');
-                        }
-                    } else if (result.action === 'DELETE') {
-                        // 删除任务
-                        if (!result.id) throw new Error('缺少字段: id');
-                        let tasks = safeGetTasks();
-                        const idx = tasks.findIndex(t => t.id === result.id);
-                        if (idx > -1) {
-                            tasks.splice(idx, 1);
-                            localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
-                            triggerDataUpdate();
-                            showChatMessage('Task deleted successfully!', 'assistant');
-                        } else {
-                            throw new Error('Task not found');
-                        }
-                    } else if (result.action === 'FILTER') {
-                        if (!result.filterType || !result.value) {
-                            throw new Error('Missing required fields for FILTER action');
-                        }
-                        
-                        const tasks = safeGetTasks();
-                        const filtered = tasks.filter(task => task[result.filterType] === result.value);
-                        showChatMessage(`Found ${filtered.length} records`, 'assistant');
-                    } else {
-                        throw new Error(`Unknown action: ${result.action}`);
+                    } catch (err) {
+                        showChatMessage(`指令处理失败: ${line}，原因：${err.message}`, 'error');
+                        failCount++;
                     }
-                } catch (error) {
-                    console.error('Command execution error:', error);
-                    showChatMessage(`Error: ${error.message}`, 'error');
                 }
+                showChatMessage(`批量处理完成，成功${successCount}条，失败${failCount}条。`, 'assistant');
             }
         });
 
@@ -1255,11 +1222,21 @@
                 input.readOnly = true;
                 input.value = currentValue;
                 input.placeholder = 'DD/MM';
-                const picker = createDatePicker(cell, currentValue, (newDate) => {
+                let picker = null;
+                // 定义finishEditing并赋值到全局
+                const originalContent = cell.innerHTML;
+                function finishEditing() {
+                    cell.classList.remove('editing');
+                    cell.innerHTML = originalContent;
+                }
+                currentFinishEditing = finishEditing;
+                picker = createDatePicker(cell, currentValue, (newDate) => {
                     const newData = { date: newDate };
                     updateTask(taskId, newData);
                     cell.classList.remove('editing');
-                    cell.innerHTML = `<span class="info-value">${newDate}</span>`;
+                    cell.innerHTML = `<span class=\"info-value\">${newDate}</span>`;
+                    currentFinishEditing = null;
+                    if (picker && picker.parentNode) picker.parentNode.removeChild(picker);
                 });
                 input.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -1267,6 +1244,19 @@
                     picker.style.top = `${rect.bottom + window.scrollY}px`;
                     picker.style.left = `${rect.left + window.scrollX}px`;
                     document.body.appendChild(picker);
+                });
+                // 只保留带picker判断的blur事件，调用全局currentFinishEditing
+                input.addEventListener('blur', (e) => {
+                    setTimeout(() => {
+                        const active = document.activeElement;
+                        if (picker && picker.contains(active)) {
+                            return;
+                        }
+                        if (!cell.contains(active)) {
+                            if (typeof currentFinishEditing === 'function') currentFinishEditing();
+                            currentFinishEditing = null;
+                        }
+                    }, 100);
                 });
             } else if (field === 'notes') {
                 input = document.createElement('input');
@@ -1587,6 +1577,150 @@
                     }, 10);
                 }
             });
+
+            // Identify Image 按钮功能
+            let pendingImageTasks = null; // 暂存识别结果，等待用户确认
+            document.getElementById('identifyImageBtn').onclick = async function() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/png,image/jpeg,image/jpg';
+                input.style.display = 'none';
+                document.body.appendChild(input);
+                input.onchange = async function(ev) {
+                    const file = input.files[0];
+                    if (!file) return;
+                    showChatMessage('Recognizing image, please wait...', 'assistant');
+                    try {
+                        // 使用 OCR.Space 识别图片
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('apikey', 'K82547018388957');
+                        formData.append('language', 'eng');
+                        formData.append('isTable', 'true');
+                        const ocrRes = await fetch('https://api.ocr.space/parse/image', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const ocrData = await ocrRes.json();
+                        let text = '';
+                        if (ocrData && ocrData.ParsedResults && ocrData.ParsedResults[0]) {
+                            text = ocrData.ParsedResults[0].ParsedText || '';
+                        }
+                        if (!text) {
+                            showChatMessage('OCR failed to recognize any text from the image.', 'error');
+                            return;
+                        }
+                        console.log('OCR原始文本:', text);
+                        showChatMessage('Analyzing recognized text with AI, please wait...', 'assistant');
+                        const prompt = `Please extract all logistics tasks from the following table text. Output a JSON array, each object should contain: \n- orderNo (must be TO + at least 15 digits/letters, no extra characters, no spaces)\n- type (only 'Pickup' or 'Delivery', if not clear, use 'Delivery')\n- pallets (number)\n- date (format as DD/MM, do NOT include year)\n- notes (only use the content from the Notes column, if not present, leave empty. Do not include contact, address, or other info)\nIgnore any irrelevant information. Do not include client, contact, or address fields. Output strict JSON array, no explanation, no markdown, no code block.\n\nText:\n${text}`;
+                        // Deepseek AI分析
+                        const aiRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer sk-0cab5429310d438487895671c2fbc943'
+                            },
+                            body: JSON.stringify({
+                                model: 'deepseek-chat',
+                                messages: [
+                                    { role: 'system', content: prompt }
+                                ]
+                            })
+                        });
+                        const aiData = await aiRes.json();
+                        let aiContent = aiData.choices?.[0]?.message?.content || '';
+                        aiContent = aiContent.replace(/```json|```/gi, '').trim();
+                        // 只保留有效JSON数组
+                        const firstBracket = aiContent.indexOf('[');
+                        const lastBracket = aiContent.lastIndexOf(']');
+                        if (firstBracket !== -1 && lastBracket !== -1) {
+                            aiContent = aiContent.substring(firstBracket, lastBracket + 1);
+                        }
+                        console.log('AI返回内容:', aiContent);
+                        let tasks = [];
+                        try {
+                            tasks = JSON.parse(aiContent);
+                        } catch (e) {
+                            showChatMessage('AI analysis failed, please try again.', 'error');
+                            return;
+                        }
+                        // 自动处理所有日期字段，只保留DD/MM格式
+                        tasks.forEach(t => {
+                            if (t.date) {
+                                // 匹配DD/MM或DD/MM/YYYY
+                                const m = t.date.match(/(\d{2})\/(\d{2})(?:\/\d{4})?/);
+                                if (m) t.date = `${m[1]}/${m[2]}`;
+                            }
+                        });
+                        if (!tasks.length) {
+                            showChatMessage('No valid tasks recognized from the image.', 'assistant');
+                            return;
+                        }
+                        pendingImageTasks = tasks;
+                        // 英文反馈
+                        let msg = 'Recognized the following tasks from the image:\n';
+                        tasks.forEach((t, i) => {
+                            msg += `#${i+1}: Order No.: ${t.orderNo}, Type: ${t.type}, Pallets: ${t.pallets}, Date: ${t.date}, Notes: ${t.notes}\n`;
+                        });
+                        msg += 'Are these recognized tasks correct? Please reply "yes" to confirm or "no" to cancel.';
+                        showChatMessage(msg, 'assistant');
+                    } catch (err) {
+                        showChatMessage('Image recognition or AI analysis failed: ' + err.message, 'error');
+                    }
+                };
+                input.click();
+            };
+
+            // 聊天框监听用户yes/no确认
+            const oldChatInputHandler = document.getElementById('command-input').onkeypress;
+            document.getElementById('command-input').addEventListener('keypress', async (e) => {
+                if (pendingImageTasks && e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const val = e.target.value.trim().toLowerCase();
+                    e.target.value = '';
+                    showChatMessage(val, 'user');
+                    if (val === 'yes') {
+                        let successCount = 0, failCount = 0;
+                        for (const t of pendingImageTasks) {
+                            try {
+                                // 复用批量新建逻辑
+                                const newTask = {
+                                    id: t.orderNo || generateUniqueId(),
+                                    status: 'Pending',
+                                    pallets: t.pallets || '',
+                                    type: t.type || '',
+                                    deliveryScope: t.type === 'Pickup' ? (t.deliveryScope || '') : '',
+                                    date: t.date || getTodayDateStr(),
+                                    notes: t.notes || ''
+                                };
+                                const tasks = safeGetTasks();
+                                if (newTask.id) {
+                                    tasks.push(newTask);
+                                    localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
+                                    triggerDataUpdate();
+                                    successCount++;
+                                } else {
+                                    failCount++;
+                                }
+                            } catch {
+                                failCount++;
+                            }
+                        }
+                        showChatMessage(`Tasks created successfully! Success: ${successCount}, Fail: ${failCount}.`, 'assistant');
+                        pendingImageTasks = null;
+                    } else if (val === 'no') {
+                        showChatMessage('Operation cancelled.', 'assistant');
+                        pendingImageTasks = null;
+                    } else {
+                        showChatMessage('Please reply "yes" to confirm or "no" to cancel.', 'assistant');
+                    }
+                    return;
+                }
+                // 其它输入，走原有批量处理逻辑
+                if (typeof oldChatInputHandler === 'function') {
+                    oldChatInputHandler.call(this, e);
+                }
+            }, true);
         });
 
         // 监听删除按钮
