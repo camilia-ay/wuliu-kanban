@@ -542,18 +542,6 @@
             return `TRK${String(maxId + 1).padStart(3, '0')}`;
         }
 
-        // 安全的数据获取
-        function safeGetTasks() {
-            try {
-                return JSON.parse(localStorage.getItem('logisticsTasks')) || [];
-            } catch (error) {
-                console.error('数据损坏，正在重置...');
-                showError('数据损坏，正在重置...');
-                localStorage.removeItem('logisticsTasks');
-                return [];
-            }
-        }
-
         // 错误提示
         function showError(message) {
             const errorDiv = document.getElementById('errorMessage');
@@ -1854,6 +1842,184 @@
             a.click();
             document.body.removeChild(a);
         }
+
+        // == Supabase 数据操作函数 ==
+        async function loadTasksFromSupabase() {
+            const { data, error } = await supabase
+                .from('tasks')
+                .select('*')
+                .order('created_at', { ascending: false });
+            
+            if (error) {
+                console.error('Error loading tasks:', error);
+                return [];
+            }
+            return data || [];
+        }
+
+        async function saveTaskToSupabase(task) {
+            const { data, error } = await supabase
+                .from('tasks')
+                .upsert(task)
+                .select();
+            
+            if (error) {
+                console.error('Error saving task:', error);
+                return null;
+            }
+            return data[0];
+        }
+
+        async function deleteTaskFromSupabase(trackingId) {
+            const { error } = await supabase
+                .from('tasks')
+                .delete()
+                .eq('id', trackingId);
+            
+            if (error) {
+                console.error('Error deleting task:', error);
+                return false;
+            }
+            return true;
+        }
+
+        async function loadPdfMapsFromSupabase() {
+            const { data, error } = await supabase
+                .from('pdf_maps')
+                .select('*');
+            
+            if (error) {
+                console.error('Error loading PDF maps:', error);
+                return {};
+            }
+            
+            // 转换为本地格式
+            const map = {};
+            data.forEach(item => {
+                map[item.tracking_id] = item.file_name;
+            });
+            return map;
+        }
+
+        async function savePdfMapToSupabase(trackingId, fileName) {
+            const { error } = await supabase
+                .from('pdf_maps')
+                .upsert({
+                    tracking_id: trackingId,
+                    file_name: fileName
+                });
+            
+            if (error) {
+                console.error('Error saving PDF map:', error);
+                return false;
+            }
+            return true;
+        }
+
+        async function deletePdfMapFromSupabase(trackingId) {
+            const { error } = await supabase
+                .from('pdf_maps')
+                .delete()
+                .eq('tracking_id', trackingId);
+            
+            if (error) {
+                console.error('Error deleting PDF map:', error);
+                return false;
+            }
+            return true;
+        }
+
+        // 修改原有的数据操作函数
+        async function getTasks() {
+            return await loadTasksFromSupabase();
+        }
+
+        async function setTasks(tasks) {
+            for (const task of tasks) {
+                await saveTaskToSupabase(task);
+            }
+        }
+
+        async function getPdfMap() {
+            return await loadPdfMapsFromSupabase();
+        }
+
+        async function setPdfMap(map) {
+            for (const [trackingId, fileName] of Object.entries(map)) {
+                await savePdfMapToSupabase(trackingId, fileName);
+            }
+        }
+
+        // 修改 PDF 上传函数
+        async function uploadPdfToSupabase(file, trackingId) {
+            const fileName = file.name;
+            // 上传到 Supabase Storage
+            const { data, error } = await supabase.storage
+                .from(SUPABASE_BUCKET)
+                .upload(fileName, file, { upsert: true });
+            
+            if (error) {
+                alert('Upload failed: ' + error.message);
+                return false;
+            }
+            
+            // 保存映射关系到数据库
+            await savePdfMapToSupabase(trackingId, fileName);
+            alert('PDF uploaded to Supabase and bound to ' + trackingId);
+            triggerDataUpdate();
+            return true;
+        }
+
+        // 修改 PDF 下载函数
+        async function downloadPdfFromSupabase(trackingId) {
+            const map = await getPdfMap();
+            const fileName = map[trackingId];
+            if (!fileName) {
+                alert('No PDF bound to this tracking number.');
+                return;
+            }
+            
+            const { data, error } = await supabase.storage
+                .from(SUPABASE_BUCKET)
+                .getPublicUrl(fileName);
+            
+            if (error || !data || !data.publicUrl) {
+                alert('Failed to get public URL: ' + (error ? error.message : 'No URL'));
+                return;
+            }
+            
+            const a = document.createElement('a');
+            a.href = data.publicUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // 添加实时订阅
+        supabase
+            .channel('tasks_changes')
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'tasks' 
+            }, payload => {
+                console.log('Tasks changed:', payload);
+                triggerDataUpdate();
+            })
+            .subscribe();
+
+        supabase
+            .channel('pdf_maps_changes')
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'pdf_maps' 
+            }, payload => {
+                console.log('PDF maps changed:', payload);
+                triggerDataUpdate();
+            })
+            .subscribe();
     </script>
 </body>
 </html> 
