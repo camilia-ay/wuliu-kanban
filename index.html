@@ -566,7 +566,7 @@
                 const updatedTask = { ...tasks[index], ...newData };
                 if (updatedTask.id) {
                     await saveTaskToSupabase(updatedTask);
-                    triggerDataUpdate();
+                    await initializeDataSupabase();
                     return true;
                 } else {
                     showError('Data validation failed, missing key fields');
@@ -1339,13 +1339,12 @@
             const taskId = e.dataTransfer.getData('text/plain');
             const newStatus = e.target.closest('.swimlane')?.dataset.status;
             if (newStatus) {
-                // 获取当前所有任务（从Supabase渲染的tasks）
                 let tasks = await loadTasksFromSupabase();
                 let task = tasks.find(t => t.id === taskId);
                 if (task) {
                     task.status = newStatus;
                     await saveTaskToSupabase(task);
-                    await initializeDataSupabase(); // 刷新页面
+                    await initializeDataSupabase();
                     const lane = e.target.closest('.swimlane');
                     if (lane) {
                         lane.classList.add('updated');
@@ -1407,6 +1406,7 @@
         }
 
         // == Supabase 数据优先的初始化和渲染 ==
+        let hasInitSampleTasks = false;
         async function initializeDataSupabase() {
             let tasks = [];
             try {
@@ -1415,11 +1415,13 @@
                 console.error('Supabase 拉取数据失败，尝试本地数据', e);
             }
             if (!tasks || tasks.length === 0) {
-                // Supabase 没有数据，自动写入 sampleTasks
-                for (const t of sampleTasks) {
-                    await saveTaskToSupabase(t);
+                if (!hasInitSampleTasks) {
+                    for (const t of sampleTasks) {
+                        await saveTaskToSupabase(t);
+                    }
+                    hasInitSampleTasks = true;
+                    tasks = [...sampleTasks];
                 }
-                tasks = [...sampleTasks];
             }
             renderTableSupabase(tasks);
             renderKanbanSupabase(tasks);
@@ -1830,7 +1832,7 @@
                 const id = e.target.getAttribute('data-id');
                 if (confirm('确定要删除这个任务吗？')) {
                     await deleteTaskFromSupabase(id);
-                    triggerDataUpdate();
+                    await initializeDataSupabase();
                 }
             }
         });
