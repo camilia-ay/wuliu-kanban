@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logistics Task Board</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.1/dist/tesseract.min.js"></script>
     <!-- 引入 PaddleOCR.js CDN -->
     <script src="https://unpkg.com/paddleocr/dist/paddle-ocr.min.js"></script>
@@ -489,6 +489,12 @@
     </div>
 
     <script>
+        // == Supabase 配置与初始化 ==
+        const SUPABASE_URL = 'https://epxnzvmxmtcacdmdeezz.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVweG56dm14bXRjYWNkbWRlZXp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg4NTkyMjQsImV4cCI6MjA2NDQzNTIyNH0.D0N3G4DO7at7TH_VwoW1PwOZMkrD4tKJo0bcepAb5v8';
+        const SUPABASE_BUCKET = 'renwukanbanpdf';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
         // 常量定义
         const VALID_STATUS = ['Pending', 'In Transit', 'Completed'];
         const VALID_TYPES = ['Pickup', 'Delivery'];
@@ -539,7 +545,9 @@
                 const num = parseInt(task.id.replace('TRK', ''));
                 return isNaN(num) ? max : Math.max(max, num);
             }, 0);
-            return `TRK${String(maxId + 1).padStart(3, '0')}`;
+            const newId = `TRK${String(maxId + 1).padStart(3, '0')}`;
+            console.log('generateUniqueId被调用，返回:', newId);
+            return newId;
         }
 
         // 错误提示
@@ -830,11 +838,11 @@
                 e.preventDefault();
                 const input = e.target.value.trim();
                 if (!input) return;
-
+                
                 e.target.value = '';
                 showChatMessage(input, 'user');
                 showChatMessage('Processing...', 'loading');
-
+                
                 // 按行分割，过滤空行
                 const lines = input.split('\n').map(line => line.trim()).filter(line => line);
 
@@ -845,30 +853,30 @@
                         const result = await ChatAssistant.parseCommand(line);
                         if (result.error) throw new Error(result.error);
 
-                        if (result.action === 'CREATE') {
-                            if (!result.status) result.status = 'Pending';
+                    if (result.action === 'CREATE') {
+                        if (!result.status) result.status = 'Pending';
                             const userId = extractIdFromInput(line);
-                            let parsedDate = result.date ? parseNaturalDate(result.date) : '';
-                            if (!parsedDate) parsedDate = getTodayDateStr();
-                            const newTask = {
-                                id: userId || result.id || generateUniqueId(),
-                                status: result.status,
+                        let parsedDate = result.date ? parseNaturalDate(result.date) : '';
+                        if (!parsedDate) parsedDate = getTodayDateStr();
+                        const newTask = {
+                            id: userId || result.id || generateUniqueId(),
+                            status: result.status,
                                 pallets: Number(result.pallets) || 0,
-                                type: result.type || '',
+                            type: result.type || '',
                                 delivery_scope: result.delivery_scope || '',
-                                date: parsedDate
-                            };
+                            date: parsedDate
+                        };
                             // == 切换为 Supabase 数据流 ==
-                            if (newTask.id) {
+                        if (newTask.id) {
                                 await saveTaskToSupabase(newTask);
                                 await initializeDataSupabase(); // 刷新渲染
-                                if (validateTask(newTask)) {
+                            if (validateTask(newTask)) {
                                     showChatMessage(`任务创建成功: ${newTask.id}`, 'assistant');
-                                } else {
-                                    showChatMessage(`部分字段缺失，已记录可识别信息: ${newTask.id}`, 'assistant');
-                                }
-                                successCount++;
                             } else {
+                                    showChatMessage(`部分字段缺失，已记录可识别信息: ${newTask.id}`, 'assistant');
+                            }
+                                successCount++;
+                        } else {
                                 throw new Error('缺少关键字段，未能创建');
                             }
                         } else {
@@ -944,7 +952,6 @@
                     const arrow = th.querySelector('.header-arrow');
                     arrow.onclick = (e) => {
                         e.stopPropagation();
-                        // 计算位置
                         const rect = th.getBoundingClientRect();
                         const dropdown = createHeaderDropdown([
                             { label: 'All', value: '' },
@@ -953,7 +960,7 @@
                             { label: 'Completed', value: 'Completed' }
                         ], currentFilter.status, (val) => {
                             currentFilter.status = val;
-                            renderTable();
+                            renderTableSupabase(window._lastSupabaseTasks || [], getPdfMap());
                         });
                         dropdown.style.left = rect.left + 'px';
                         dropdown.style.top = (rect.bottom + window.scrollY) + 'px';
@@ -974,7 +981,7 @@
                             { label: 'Delivery', value: 'Delivery' }
                         ], currentFilter.type, (val) => {
                             currentFilter.type = val;
-                            renderTable();
+                            renderTableSupabase(window._lastSupabaseTasks || [], getPdfMap());
                         });
                         dropdown.style.left = rect.left + 'px';
                         dropdown.style.top = (rect.bottom + window.scrollY) + 'px';
@@ -996,7 +1003,7 @@
                             { label: 'SA', value: 'SA' }
                         ], currentFilter.delivery_scope, (val) => {
                             currentFilter.delivery_scope = val;
-                            renderTable();
+                            renderTableSupabase(window._lastSupabaseTasks || [], getPdfMap());
                         });
                         dropdown.style.left = rect.left + 'px';
                         dropdown.style.top = (rect.bottom + window.scrollY) + 'px';
@@ -1015,7 +1022,7 @@
                             currentSort.field = 'date';
                             currentSort.asc = true;
                         }
-                        renderTable();
+                        renderTableSupabase(window._lastSupabaseTasks || [], getPdfMap());
                     };
                 }
             });
@@ -1053,9 +1060,8 @@
                 row.dataset.status = status;
                 const statusClass = status.toLowerCase().replace(' ', '-');
                 // PDF图标判断
-                const pdfData = getPdfById(task.id);
                 let pdfIconHtml = '';
-                if (pdfData) {
+                if (getPdfMap() && getPdfMap()[task.id]) {
                     pdfIconHtml = `<span class="pdf-download-icon" data-id="${task.id}" title="Download PDF" style="cursor:pointer;font-size:18px;color:#F7941D;margin-left:8px;vertical-align:middle;">&#8595;</span>`;
                 } else {
                     pdfIconHtml = `<span class="pdf-upload-icon" data-id="${task.id}" title="Add PDF" style="cursor:pointer;font-size:20px;color:#888;margin-left:8px;vertical-align:middle;">+</span>`;
@@ -1347,10 +1353,10 @@
                     await initializeDataSupabase();
                     const lane = e.target.closest('.swimlane');
                     if (lane) {
-                        lane.classList.add('updated');
-                        setTimeout(() => {
-                            lane.classList.remove('updated');
-                        }, 1000);
+                    lane.classList.add('updated');
+                    setTimeout(() => {
+                        lane.classList.remove('updated');
+                    }, 1000);
                     }
                 }
             }
@@ -1411,24 +1417,32 @@
             let tasks = [];
             try {
                 tasks = await loadTasksFromSupabase();
+                window._lastSupabaseTasks = tasks;
+                console.log('Supabase拉取到的tasks:', tasks);
             } catch (e) {
-                console.error('Supabase 拉取数据失败，尝试本地数据', e);
+                console.error('Supabase 拉取数据失败', e);
             }
+            // 只在第一次加载且数据库为空时才初始化示例数据
             if (!tasks || tasks.length === 0) {
                 if (!hasInitSampleTasks) {
+                    console.log('首次加载，初始化示例数据...');
                     for (const t of sampleTasks) {
                         await saveTaskToSupabase(t);
                     }
                     hasInitSampleTasks = true;
                     tasks = [...sampleTasks];
                 }
+            } else {
+                hasInitSampleTasks = true;
             }
-            renderTableSupabase(tasks);
+            // 只拉取pdfMap，不再setPdfMap
+            const pdfMap = await getPdfMap();
+            renderTableSupabase(tasks, pdfMap);
             renderKanbanSupabase(tasks);
         }
 
         // == 用 Supabase 数据渲染表格 ==
-        function renderTableSupabase(tasks) {
+        function renderTableSupabase(tasks, pdfMap) {
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             tasks.forEach(task => {
@@ -1441,9 +1455,12 @@
                 row.dataset.status = status;
                 const statusClass = status.toLowerCase().replace(' ', '-');
                 // PDF图标判断
-                // 这里可后续用 Supabase pdf_map
                 let pdfIconHtml = '';
-                pdfIconHtml = `<span class="pdf-upload-icon" data-id="${task.id}" title="Add PDF" style="cursor:pointer;font-size:20px;color:#888;margin-left:8px;vertical-align:middle;">+</span>`;
+                if (pdfMap && pdfMap[task.id]) {
+                    pdfIconHtml = `<span class="pdf-download-icon" data-id="${task.id}" title="Download PDF" style="cursor:pointer;font-size:18px;color:#F7941D;margin-left:8px;vertical-align:middle;">&#8595;</span>`;
+                } else {
+                    pdfIconHtml = `<span class="pdf-upload-icon" data-id="${task.id}" title="Add PDF" style="cursor:pointer;font-size:20px;color:#888;margin-left:8px;vertical-align:middle;">+</span>`;
+                }
                 row.innerHTML = `
                     <td class="editable" data-field="id">
                         <span class="id-with-x">
@@ -1509,20 +1526,22 @@
                     container.appendChild(card);
                 });
             });
+            // === 自动修正：为每个卡片绑定 dragstart/dragend ===
+            document.querySelectorAll('.kanban-card').forEach(card => {
+                card.addEventListener('dragstart', e => {
+                    e.dataTransfer.setData('text/plain', card.dataset.id);
+                    e.target.style.opacity = '0.5';
+                });
+                card.addEventListener('dragend', e => {
+                    e.target.style.opacity = '';
+                });
+            });
         }
 
         // == 页面初始化时优先用 Supabase ==
         document.addEventListener('DOMContentLoaded', () => {
+            // 初始化数据
             initializeDataSupabase();
-            // 其它初始化逻辑保留
-            // ... existing code ...
-        });
-
-        // 初始化
-        document.addEventListener('DOMContentLoaded', () => {
-            fixAllDeliveryScope();
-            initializeStorage();
-            initializeData();
 
             // 初始化拖拽事件
             document.addEventListener('dragstart', e => {
@@ -1542,10 +1561,27 @@
                 document.querySelectorAll('.swimlane').forEach(l => l.classList.remove('drag-over'));
             });
 
+            // Export Table 按钮
             const exportBtn = document.getElementById('exportTableBtn');
-            if(exportBtn) exportBtn.onclick = exportTableToCSV;
+            if(exportBtn) {
+                exportBtn.onclick = () => {
+                    const rows = Array.from(document.querySelectorAll('#logisticsTable tr'));
+                    const csv = rows.map(row => {
+                        return Array.from(row.querySelectorAll('th,td')).map(cell => '"' + cell.innerText.replace(/"/g, '""') + '"').join(',');
+                    }).join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'logistics_table.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                };
+            }
 
-            // Add PDF button upload functionality
+            // Add PDF 按钮
             const addPdfBtn = document.getElementById('addPdfGlobalBtn');
             const pdfFileInput = document.getElementById('pdfFileInput');
             if(addPdfBtn && pdfFileInput) {
@@ -1557,7 +1593,7 @@
                     const file = e.target.files[0];
                     if (!file) return;
                     if (file.type !== 'application/pdf') {
-                        alert('Please select a PDF file.');
+                        alert('请选择PDF文件');
                         return;
                     }
                     try {
@@ -1565,8 +1601,12 @@
                         const arrayBuffer = await file.arrayBuffer();
                         // 2. PDF转文本
                         const pdfText = await pdfToText(arrayBuffer);
+                        console.log('PDF转文本内容:', pdfText);
+
                         // 3. 优先本地正则提取Order Number
                         let trackingId = await extractOrderNumberFromPdfText(pdfText);
+                        console.log('本地正则提取单号:', trackingId);
+
                         // 4. 若本地未识别到，再调用Deepseek兜底
                         if (!trackingId) {
                             const dsRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -1592,23 +1632,247 @@
                                 const match = trackingId.match(/TO[0-9A-Za-z]+/);
                                 trackingId = match ? match[0] : '';
                             }
+                            console.log('AI返回内容:', dsData);
                         }
                         if (trackingId) {
-                            uploadPdfToSupabase(file, trackingId);
+                            await uploadPdfToSupabase(file, trackingId);
                         } else {
-                            alert('Failed to recognize tracking number from PDF.');
+                            alert('无法从PDF中识别物流单号');
                         }
                     } catch (err) {
-                        alert('PDF recognition error: ' + err.message);
+                        alert('PDF识别错误: ' + err.message);
                     }
                 };
             }
 
-            // 监听表格Tracking#列右键菜单解绑PDF功能
+            // Identify Image 按钮
+            const identifyImageBtn = document.getElementById('identifyImageBtn');
+            if(identifyImageBtn) {
+                identifyImageBtn.onclick = async function() {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/png,image/jpeg,image/jpg';
+                    input.style.display = 'none';
+                    document.body.appendChild(input);
+                    input.onchange = async function(ev) {
+                        const file = input.files[0];
+                        if (!file) return;
+                        showChatMessage('正在识别图片，请稍候...', 'assistant');
+                        try {
+                            // 使用 OCR.Space 识别图片
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            formData.append('apikey', 'K82547018388957');
+                            formData.append('language', 'eng');
+                            formData.append('isTable', 'true');
+                            const ocrRes = await fetch('https://api.ocr.space/parse/image', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const ocrData = await ocrRes.json();
+                            let text = '';
+                            if (ocrData && ocrData.ParsedResults && ocrData.ParsedResults[0]) {
+                                text = ocrData.ParsedResults[0].ParsedText || '';
+                            }
+                            console.log('OCR原始文本:', text);
+                            if (!text) {
+                                showChatMessage('OCR未能从图片中识别出任何文本', 'error');
+                                return;
+                            }
+                            showChatMessage('正在用AI分析识别出的文本，请稍候...', 'assistant');
+                            const prompt = `Please extract all logistics tasks from the following table text. Output a JSON array, each object should contain: \n- orderNo (must be TO + at least 15 digits/letters, no extra characters, no spaces)\n- type (only 'Pickup' or 'Delivery', if not clear, use 'Delivery')\n- pallets (number)\n- date (format as DD/MM, do NOT include year)\n- notes (only use the content from the Notes column, if not present, leave empty. Do not include contact, address, or other info)\nIgnore any irrelevant information. Do not include client, contact, or address fields. Output strict JSON array, no explanation, no markdown, no code block.\n\nText:\n${text}`;
+                            // Deepseek AI分析
+                            const aiRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': 'Bearer sk-0cab5429310d438487895671c2fbc943'
+                                },
+                                body: JSON.stringify({
+                                    model: 'deepseek-chat',
+                                    messages: [
+                                        { role: 'system', content: prompt }
+                                    ]
+                                })
+                            });
+                            const aiData = await aiRes.json();
+                            let aiContent = aiData.choices?.[0]?.message?.content || '';
+                            console.log('AI返回内容:', aiContent);
+                            aiContent = aiContent.replace(/```json|```/gi, '').trim();
+                            // 只保留有效JSON数组
+                            const firstBracket = aiContent.indexOf('[');
+                            const lastBracket = aiContent.lastIndexOf(']');
+                            if (firstBracket !== -1 && lastBracket !== -1) {
+                                aiContent = aiContent.substring(firstBracket, lastBracket + 1);
+                            }
+                            console.log('AI内容用于JSON.parse前:', aiContent);
+                            // AI内容解析后，强制转换为标准数组
+                            let tasks = [];
+                            try {
+                                // 尝试标准JSON解析
+                                tasks = JSON.parse(aiContent);
+                            } catch (e) {
+                                try {
+                                    // 容错：替换单引号为双引号，去除多余逗号
+                                    let fixed = aiContent.replace(/'/g, '"').replace(/,\s*([}\]])/g, '$1');
+                                    tasks = JSON.parse(fixed);
+                                } catch (e2) {
+                                    console.error('AI内容JSON.parse失败:', e2, aiContent);
+                                    showChatMessage('AI分析失败，请重试', 'error');
+                                    return;
+                                }
+                            }
+                            // 强制转换为标准数组
+                            if (!Array.isArray(tasks)) {
+                                tasks = Object.values(tasks);
+                            }
+                            console.log('AI解析后tasks类型:', typeof tasks, 'isArray:', Array.isArray(tasks), 'length:', tasks.length);
+                            // 自动处理所有日期字段，只保留DD/MM格式
+                            tasks.forEach(t => {
+                                if (t.date) {
+                                    // 匹配DD/MM或DD/MM/YYYY
+                                    const m = t.date.match(/(\d{2})\/(\d{2})(?:\/\d{4})?/);
+                                    if (m) t.date = `${m[1]}/${m[2]}`;
+                                }
+                            });
+                            if (!tasks.length) {
+                                showChatMessage('未能从图片中识别出有效任务', 'assistant');
+                                return;
+                            }
+                            window.pendingImageTasks = tasks.map(t => ({
+                                ...t,
+                                id: t.orderNo || t.id || generateUniqueId()
+                            }));
+                            // 中文反馈
+                            let msg = '从图片中识别出以下任务：\n';
+                            tasks.forEach((t, i) => {
+                                msg += `#${i+1}: 单号: ${t.orderNo}, 类型: ${t.type}, 托盘数: ${t.pallets}, 日期: ${t.date}, 备注: ${t.notes}\n`;
+                            });
+                            msg += '这些识别出的任务是否正确？请回复"yes"确认或"no"取消。';
+                            showChatMessage(msg, 'assistant');
+                            // AI识别成功后赋值pendingImageTasks时加日志
+                            console.log('AI识别后pendingImageTasks:', window.pendingImageTasks);
+                        } catch (err) {
+                            console.error('图片识别或AI分析失败:', err);
+                            showChatMessage('图片识别或AI分析失败: ' + err.message, 'error');
+                        }
+                    };
+                    input.click();
+                };
+            }
+
+            // 聊天输入框事件处理
+            const commandInput = document.getElementById('command-input');
+            if(commandInput) {
+                commandInput.addEventListener('keypress', async (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        const input = e.target.value.trim();
+                        if (!input) return;
+
+                        e.target.value = '';
+                        showChatMessage(input, 'user');
+
+                        // 如果有待确认的图片识别任务
+                        if (window.pendingImageTasks) {
+                            console.log('确认前pendingImageTasks:', window.pendingImageTasks);
+                            if (input.toLowerCase() === 'yes') {
+                                console.log('确认时pendingImageTasks:', window.pendingImageTasks);
+                                let successCount = 0, failCount = 0;
+                                const insertPromises = [];
+                                for (const t of window.pendingImageTasks) {
+                                    try {
+                                        const id = t.orderNo || t.id || generateUniqueId();
+                                        console.log('当前任务原始对象:', t, '最终用于插入的id:', id);
+                                        if (!id) {
+                                            failCount++;
+                                            continue;
+                                        }
+                                        const newTask = {
+                                            id,
+                                            status: 'Pending',
+                                            pallets: Number(t.pallets) || 0,
+                                            type: t.type || '',
+                                            delivery_scope: t.type === 'Pickup' ? (t.delivery_scope || '') : '',
+                                            date: t.date || getTodayDateStr(),
+                                            notes: t.notes || ''
+                                        };
+                                        console.log('即将写入的newTask:', newTask);
+                                        insertPromises.push(saveTaskToSupabase(newTask));
+                                        successCount++;
+                                    } catch (err) {
+                                        console.error('批量插入任务出错:', err, t);
+                                        failCount++;
+                                    }
+                                }
+                                await Promise.all(insertPromises);
+                                console.log('批量插入循环结束');
+                                showChatMessage(`任务创建成功！成功: ${successCount}, 失败: ${failCount}`, 'assistant');
+                                window.pendingImageTasks = null;
+                                await initializeDataSupabase();
+                            } else if (input.toLowerCase() === 'no') {
+                                showChatMessage('操作已取消', 'assistant');
+                                window.pendingImageTasks = null;
+                            } else {
+                                showChatMessage('请回复"yes"确认或"no"取消', 'assistant');
+                            }
+                            return;
+                        }
+
+                        // 处理普通命令输入
+                        showChatMessage('处理中...', 'loading');
+                        const lines = input.split('\n').map(line => line.trim()).filter(line => line);
+                        let successCount = 0;
+                        let failCount = 0;
+                        for (const line of lines) {
+                            try {
+                                const result = await ChatAssistant.parseCommand(line);
+                                if (result.error) throw new Error(result.error);
+
+                                if (result.action === 'CREATE') {
+                                    if (!result.status) result.status = 'Pending';
+                                    const userId = extractIdFromInput(line);
+                                    let parsedDate = result.date ? parseNaturalDate(result.date) : '';
+                                    if (!parsedDate) parsedDate = getTodayDateStr();
+                                    const newTask = {
+                                        id: userId || result.id || generateUniqueId(),
+                                        status: result.status,
+                                        pallets: Number(result.pallets) || 0,
+                                        type: result.type || '',
+                                        delivery_scope: result.delivery_scope || '',
+                                        date: parsedDate
+                                    };
+                                    if (newTask.id) {
+                                        await saveTaskToSupabase(newTask);
+                                        await initializeDataSupabase();
+                                        if (validateTask(newTask)) {
+                                            showChatMessage(`任务创建成功: ${newTask.id}`, 'assistant');
+                                        } else {
+                                            showChatMessage(`部分字段缺失，已记录可识别信息: ${newTask.id}`, 'assistant');
+                                        }
+                                        successCount++;
+                                    } else {
+                                        throw new Error('缺少关键字段，未能创建');
+                                    }
+                                } else {
+                                    showChatMessage(`暂不支持批量处理该类型指令: ${line}`, 'error');
+                                    failCount++;
+                                }
+                            } catch (err) {
+                                showChatMessage(`指令处理失败: ${line}，原因：${err.message}`, 'error');
+                                failCount++;
+                            }
+                        }
+                        showChatMessage(`批量处理完成，成功${successCount}条，失败${failCount}条。`, 'assistant');
+                    }
+                });
+            }
+
+            // 表格PDF图标点击事件
             const tableBody = document.getElementById('tableBody');
             if(tableBody) {
-                tableBody.addEventListener('click', function(e) {
-                    // 上传PDF到Supabase并绑定
+                tableBody.addEventListener('click', async function(e) {
+                    // 上传PDF
                     if (e.target.classList.contains('pdf-upload-icon')) {
                         const trkId = e.target.getAttribute('data-id');
                         const input = document.createElement('input');
@@ -1616,214 +1880,26 @@
                         input.accept = 'application/pdf';
                         input.style.display = 'none';
                         document.body.appendChild(input);
-                        input.onchange = function(ev) {
+                        input.onchange = async function(ev) {
                             const file = input.files[0];
                             if (!file) return;
                             if (file.type !== 'application/pdf') {
-                                alert('Please select a PDF file.');
+                                alert('请选择PDF文件');
                                 document.body.removeChild(input);
                                 return;
                             }
-                            uploadPdfToSupabase(file, trkId);
+                            await uploadPdfToSupabase(file, trkId);
                             document.body.removeChild(input);
                         };
                         input.click();
                     }
-                    // 下载PDF从Supabase
+                    // 下载PDF
                     if (e.target.classList.contains('pdf-download-icon')) {
                         const trkId = e.target.getAttribute('data-id');
-                        downloadPdfFromSupabase(trkId);
+                        await downloadPdfFromSupabase(trkId);
                     }
                 });
             }
-
-            // == 表格Tracking#列右键菜单解绑PDF功能 ==
-            document.addEventListener('contextmenu', function(e) {
-                const td = e.target.closest('td[data-field="id"]');
-                if (td) {
-                    e.preventDefault();
-                    const tr = td.closest('tr');
-                    const trkId = tr ? tr.dataset.id : null;
-                    if (!trkId) return;
-                    // 构建右键菜单
-                    let menu = document.getElementById('pdfUnbindMenu');
-                    if (menu) menu.remove();
-                    menu = document.createElement('div');
-                    menu.id = 'pdfUnbindMenu';
-                    menu.style.position = 'absolute';
-                    menu.style.left = e.pageX + 'px';
-                    menu.style.top = e.pageY + 'px';
-                    menu.style.background = '#fff';
-                    menu.style.border = '1px solid #ddd';
-                    menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-                    menu.style.zIndex = 9999;
-                    menu.style.padding = '0';
-                    menu.style.minWidth = '120px';
-                    menu.style.fontSize = '15px';
-                    menu.style.borderRadius = '6px';
-                    menu.innerHTML = `<div style='padding:10px 18px;cursor:pointer;'>Unbind PDF</div>`;
-                    menu.firstChild.onclick = function() {
-                        removePdfById(trkId);
-                        triggerDataUpdate();
-                        menu.remove();
-                        alert('PDF unbound from ' + trkId);
-                    };
-                    document.body.appendChild(menu);
-                    // 点击其他地方关闭菜单
-                    setTimeout(() => {
-                        document.addEventListener('mousedown', function handler(ev) {
-                            if (!menu.contains(ev.target)) {
-                                menu.remove();
-                                document.removeEventListener('mousedown', handler);
-                            }
-                        });
-                    }, 10);
-                }
-            });
-
-            // Identify Image 按钮功能
-            let pendingImageTasks = null; // 暂存识别结果，等待用户确认
-            document.getElementById('identifyImageBtn').onclick = async function() {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = 'image/png,image/jpeg,image/jpg';
-                input.style.display = 'none';
-                document.body.appendChild(input);
-                input.onchange = async function(ev) {
-                    const file = input.files[0];
-                    if (!file) return;
-                    showChatMessage('Recognizing image, please wait...', 'assistant');
-                    try {
-                        // 使用 OCR.Space 识别图片
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        formData.append('apikey', 'K82547018388957');
-                        formData.append('language', 'eng');
-                        formData.append('isTable', 'true');
-                        const ocrRes = await fetch('https://api.ocr.space/parse/image', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        const ocrData = await ocrRes.json();
-                        let text = '';
-                        if (ocrData && ocrData.ParsedResults && ocrData.ParsedResults[0]) {
-                            text = ocrData.ParsedResults[0].ParsedText || '';
-                        }
-                        if (!text) {
-                            showChatMessage('OCR failed to recognize any text from the image.', 'error');
-                            return;
-                        }
-                        console.log('OCR原始文本:', text);
-                        showChatMessage('Analyzing recognized text with AI, please wait...', 'assistant');
-                        const prompt = `Please extract all logistics tasks from the following table text. Output a JSON array, each object should contain: \n- orderNo (must be TO + at least 15 digits/letters, no extra characters, no spaces)\n- type (only 'Pickup' or 'Delivery', if not clear, use 'Delivery')\n- pallets (number)\n- date (format as DD/MM, do NOT include year)\n- notes (only use the content from the Notes column, if not present, leave empty. Do not include contact, address, or other info)\nIgnore any irrelevant information. Do not include client, contact, or address fields. Output strict JSON array, no explanation, no markdown, no code block.\n\nText:\n${text}`;
-                        // Deepseek AI分析
-                        const aiRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': 'Bearer sk-0cab5429310d438487895671c2fbc943'
-                            },
-                            body: JSON.stringify({
-                                model: 'deepseek-chat',
-                                messages: [
-                                    { role: 'system', content: prompt }
-                                ]
-                            })
-                        });
-                        const aiData = await aiRes.json();
-                        let aiContent = aiData.choices?.[0]?.message?.content || '';
-                        aiContent = aiContent.replace(/```json|```/gi, '').trim();
-                        // 只保留有效JSON数组
-                        const firstBracket = aiContent.indexOf('[');
-                        const lastBracket = aiContent.lastIndexOf(']');
-                        if (firstBracket !== -1 && lastBracket !== -1) {
-                            aiContent = aiContent.substring(firstBracket, lastBracket + 1);
-                        }
-                        console.log('AI返回内容:', aiContent);
-                        let tasks = [];
-                        try {
-                            tasks = JSON.parse(aiContent);
-                        } catch (e) {
-                            showChatMessage('AI analysis failed, please try again.', 'error');
-                            return;
-                        }
-                        // 自动处理所有日期字段，只保留DD/MM格式
-                        tasks.forEach(t => {
-                            if (t.date) {
-                                // 匹配DD/MM或DD/MM/YYYY
-                                const m = t.date.match(/(\d{2})\/(\d{2})(?:\/\d{4})?/);
-                                if (m) t.date = `${m[1]}/${m[2]}`;
-                            }
-                        });
-                        if (!tasks.length) {
-                            showChatMessage('No valid tasks recognized from the image.', 'assistant');
-                            return;
-                        }
-                        pendingImageTasks = tasks;
-                        // 英文反馈
-                        let msg = 'Recognized the following tasks from the image:\n';
-                        tasks.forEach((t, i) => {
-                            msg += `#${i+1}: Order No.: ${t.orderNo}, Type: ${t.type}, Pallets: ${t.pallets}, Date: ${t.date}, Notes: ${t.notes}\n`;
-                        });
-                        msg += 'Are these recognized tasks correct? Please reply "yes" to confirm or "no" to cancel.';
-                        showChatMessage(msg, 'assistant');
-                    } catch (err) {
-                        showChatMessage('Image recognition or AI analysis failed: ' + err.message, 'error');
-                    }
-                };
-                input.click();
-            };
-
-            // 聊天框监听用户yes/no确认
-            const oldChatInputHandler = document.getElementById('command-input').onkeypress;
-            document.getElementById('command-input').addEventListener('keypress', async (e) => {
-                if (pendingImageTasks && e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const val = e.target.value.trim().toLowerCase();
-                    e.target.value = '';
-                    showChatMessage(val, 'user');
-                    if (val === 'yes') {
-                        let successCount = 0, failCount = 0;
-                        for (const t of pendingImageTasks) {
-                            try {
-                                // 复用批量新建逻辑
-                                const newTask = {
-                                    id: t.orderNo || generateUniqueId(),
-                                    status: 'Pending',
-                                    pallets: Number(t.pallets) || 0,
-                                    type: t.type || '',
-                                    delivery_scope: t.type === 'Pickup' ? (t.delivery_scope || '') : '',
-                                    date: t.date || getTodayDateStr(),
-                                    notes: t.notes || ''
-                                };
-                                const tasks = safeGetTasks();
-                                if (newTask.id) {
-                                    tasks.push(newTask);
-                                    localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
-                                    triggerDataUpdate();
-                                    successCount++;
-                                } else {
-                                    failCount++;
-                                }
-                            } catch {
-                                failCount++;
-                            }
-                        }
-                        showChatMessage(`Tasks created successfully! Success: ${successCount}, Fail: ${failCount}.`, 'assistant');
-                        pendingImageTasks = null;
-                    } else if (val === 'no') {
-                        showChatMessage('Operation cancelled.', 'assistant');
-                        pendingImageTasks = null;
-                    } else {
-                        showChatMessage('Please reply "yes" to confirm or "no" to cancel.', 'assistant');
-                    }
-                    return;
-                }
-                // 其它输入，走原有批量处理逻辑
-                if (typeof oldChatInputHandler === 'function') {
-                    oldChatInputHandler.call(this, e);
-                }
-            }, true);
         });
 
         // 监听删除按钮
@@ -1837,123 +1913,100 @@
             }
         });
 
-        // Export table to CSV
-        function exportTableToCSV() {
-            const rows = Array.from(document.querySelectorAll('#logisticsTable tr'));
-            const csv = rows.map(row => {
-                return Array.from(row.querySelectorAll('th,td')).map(cell => '"' + cell.innerText.replace(/"/g, '""') + '"').join(',');
-            }).join('\n');
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'logistics_table.csv';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
+        // == PDF 相关操作全部只用 Supabase ==
+        // 删除/注释本地 pdfMap 相关函数
+        /*
+        function getPdfMap() { ... }
+        function setPdfMap(map) { ... }
+        function bindPdfToId(id, pdfData) { ... }
+        function getPdfById(id) { ... }
+        function removePdfById(id) { ... }
+        */
 
-        // PDF storage structure: mapping from tracking number to PDF (localStorage: pdfMap)
-        function getPdfMap() {
-            try {
-                return JSON.parse(localStorage.getItem('pdfMap')) || {};
-            } catch (e) {
-                return {};
-            }
-        }
-        function setPdfMap(map) {
-            localStorage.setItem('pdfMap', JSON.stringify(map));
-        }
-        // Bind PDF to tracking number
-        function bindPdfToId(id, pdfData) {
-            const map = getPdfMap();
-            map[id] = pdfData;
-            setPdfMap(map);
-        }
-        // Get PDF by tracking number
-        function getPdfById(id) {
-            const map = getPdfMap();
-            return map[id] || null;
-        }
-        // Delete PDF by tracking number
-        function removePdfById(id) {
-            const map = getPdfMap();
-            delete map[id];
-            setPdfMap(map);
-        }
-
-        // PDF转文本工具函数
-        async function pdfToText(arrayBuffer) {
-            const pdfjsLib = window['pdfjsLib'];
-            if (!pdfjsLib) throw new Error('pdf.js not loaded');
-            const loadingTask = pdfjsLib.getDocument({data: arrayBuffer});
-            const pdf = await loadingTask.promise;
-            let text = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                text += content.items.map(item => item.str).join(' ') + '\n';
-            }
-            return text;
-        }
-
-        // == 优化PDF单号本地识别逻辑 ==
-        async function extractOrderNumberFromPdfText(pdfText) {
-            // 优先匹配Order Number:TO...（允许中英文冒号、空格、换行）
-            const orderNumRegex = /Order Number[:：]?\s*(TO[0-9A-Za-z]+)/i;
-            const match = pdfText.match(orderNumRegex);
-            if (match) return match[1];
-            // 兜底：匹配第一个TO开头的长单号（20位及以上）
-            const fallback = pdfText.match(/(TO[0-9A-Za-z]{12,})/);
-            return fallback ? fallback[1] : '';
-        }
-
-        // == Supabase初始化 ==
-        const SUPABASE_URL = 'https://epxnzvmxmtcacdmdeezz.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVweG56dm14bXRjYWNkbWRlZXp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg4NTkyMjQsImV4cCI6MjA2NDQzNTIyNH0.D0N3G4DO7at7TH_VwoW1PwOZMkrD4tKJo0bcepAb5v8';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        const SUPABASE_BUCKET = 'renwukanbanpdf';
-
-        // == 上传PDF到Supabase并维护本地pdfMap ==
+        // 修改 PDF 上传、下载、解绑等操作，全部用 Supabase
         async function uploadPdfToSupabase(file, trackingId) {
             const fileName = file.name;
-            // 上传到Supabase
+            
+            // 检查是否已存在相同的PDF映射
+            const pdfMap = await getPdfMap();
+            if (pdfMap[trackingId]) {
+                // 如果已存在，先删除旧的映射
+                await deletePdfMapFromSupabase(trackingId);
+            }
+
+            // 上传到 Supabase Storage
             const { data, error } = await supabase.storage.from(SUPABASE_BUCKET).upload(fileName, file, { upsert: true });
             if (error) {
-                alert('Upload failed: ' + error.message);
+                alert('上传失败: ' + error.message);
                 return false;
             }
-            // 本地pdfMap维护单号-文件名映射
-            const map = getPdfMap();
-            map[trackingId] = fileName;
-            setPdfMap(map);
-            alert('PDF uploaded to Supabase and bound to ' + trackingId);
-            triggerDataUpdate();
+            
+            // 保存映射关系到数据库
+            await savePdfMapToSupabase(trackingId, fileName);
+            alert('PDF已上传并绑定到 ' + trackingId);
+            await initializeDataSupabase();
             return true;
         }
 
-        // == 下载PDF从Supabase ==
         async function downloadPdfFromSupabase(trackingId) {
-            const map = getPdfMap();
-            const fileName = map[trackingId];
+            const pdfMap = await getPdfMap();
+            const fileName = pdfMap[trackingId];
             if (!fileName) {
                 alert('No PDF bound to this tracking number.');
                 return;
             }
-            // 获取公开URL
             const { data, error } = await supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(fileName);
             if (error || !data || !data.publicUrl) {
                 alert('Failed to get public URL: ' + (error ? error.message : 'No URL'));
                 return;
             }
-            // 触发下载
             const a = document.createElement('a');
             a.href = data.publicUrl;
             a.download = fileName;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+        }
+
+        async function unbindPdfFromSupabase(trackingId) {
+            try {
+                // 先查出文件名
+                const pdfMap = await getPdfMap();
+                let fileName = pdfMap[trackingId];
+                console.log('解绑时获取到的PDF映射:', pdfMap);
+                console.log('解绑时要删除的Storage文件名:', fileName);
+                
+                if (!fileName && trackingId) {
+                    fileName = `${trackingId}.pdf`;
+                    console.log('fileName为空，尝试用trackingId拼接:', fileName);
+                }
+                
+                if (fileName) {
+                    console.log('开始删除Storage文件，Bucket:', SUPABASE_BUCKET, '文件名:', fileName);
+                    const { data, error: storageError } = await supabase.storage
+                        .from(SUPABASE_BUCKET)
+                        .remove([fileName]);
+                    
+                    if (storageError) {
+                        console.error('删除Storage文件失败:', storageError);
+                        alert('删除Storage文件失败: ' + storageError.message);
+                    } else {
+                        console.log('Storage文件删除成功，返回数据:', data);
+                    }
+                } else {
+                    console.warn('未找到要删除的Storage文件名');
+                }
+                
+                // 删除数据库映射
+                const deleteResult = await deletePdfMapFromSupabase(trackingId);
+                console.log('删除数据库映射结果:', deleteResult);
+                
+                alert('PDF已解绑并尝试删除存储文件: ' + trackingId);
+                await initializeDataSupabase();
+            } catch (error) {
+                console.error('解绑PDF过程中发生错误:', error);
+                alert('解绑PDF时发生错误: ' + error.message);
+            }
         }
 
         // == Supabase 数据操作函数 ==
@@ -1971,15 +2024,16 @@
         }
 
         async function saveTaskToSupabase(task) {
+            console.log('saveTaskToSupabase被调用，task:', task);
             const { data, error } = await supabase
                 .from('tasks')
                 .upsert(task)
                 .select();
-            
             if (error) {
                 console.error('Error saving task:', error);
                 return null;
             }
+            console.log('saveTaskToSupabase写入后返回:', data);
             return data[0];
         }
 
@@ -2014,14 +2068,23 @@
             return map;
         }
 
+        // 生成UUID
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
         async function savePdfMapToSupabase(trackingId, fileName) {
+            const id = generateUUID();
             const { error } = await supabase
                 .from('pdf_maps')
                 .upsert({
+                    id,
                     tracking_id: trackingId,
                     file_name: fileName
                 });
-            
             if (error) {
                 console.error('Error saving PDF map:', error);
                 return false;
@@ -2063,52 +2126,6 @@
             }
         }
 
-        // 修改 PDF 上传函数
-        async function uploadPdfToSupabase(file, trackingId) {
-            const fileName = file.name;
-            // 上传到 Supabase Storage
-            const { data, error } = await supabase.storage
-                .from(SUPABASE_BUCKET)
-                .upload(fileName, file, { upsert: true });
-            
-            if (error) {
-                alert('Upload failed: ' + error.message);
-                return false;
-            }
-            
-            // 保存映射关系到数据库
-            await savePdfMapToSupabase(trackingId, fileName);
-            alert('PDF uploaded to Supabase and bound to ' + trackingId);
-            triggerDataUpdate();
-            return true;
-        }
-
-        // 修改 PDF 下载函数
-        async function downloadPdfFromSupabase(trackingId) {
-            const map = await getPdfMap();
-            const fileName = map[trackingId];
-            if (!fileName) {
-                alert('No PDF bound to this tracking number.');
-                return;
-            }
-            
-            const { data, error } = await supabase.storage
-                .from(SUPABASE_BUCKET)
-                .getPublicUrl(fileName);
-            
-            if (error || !data || !data.publicUrl) {
-                alert('Failed to get public URL: ' + (error ? error.message : 'No URL'));
-                return;
-            }
-            
-            const a = document.createElement('a');
-            a.href = data.publicUrl;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
-
         // 添加实时订阅
         supabase
             .channel('tasks_changes')
@@ -2118,7 +2135,7 @@
                 table: 'tasks' 
             }, payload => {
                 console.log('Tasks changed:', payload);
-                triggerDataUpdate();
+                    triggerDataUpdate();
             })
             .subscribe();
 
@@ -2145,6 +2162,116 @@
                 localStorage.removeItem('logisticsTasks');
                 return [];
             }
+        }
+
+        // 增强拖拽事件处理并加日志
+        document.querySelectorAll('.swimlane').forEach(lane => {
+            lane.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                lane.classList.remove('drag-over');
+                const taskId = e.dataTransfer.getData('text/plain');
+                const newStatus = lane.dataset.status;
+                console.log('drop:', { taskId, newStatus });
+                let tasks = await loadTasksFromSupabase();
+                let task = tasks.find(t => t.id === taskId);
+                console.log('找到的任务:', task);
+                if (task) {
+                    task.status = newStatus;
+                    const result = await saveTaskToSupabase(task);
+                    console.log('保存结果:', result);
+                    await initializeDataSupabase();
+                    lane.classList.add('updated');
+                    setTimeout(() => {
+                        lane.classList.remove('updated');
+                    }, 1000);
+                } else {
+                    console.warn('未找到任务，无法变更状态');
+                }
+            });
+            lane.addEventListener('dragover', e => {
+                e.preventDefault();
+                lane.classList.add('drag-over');
+            });
+            lane.addEventListener('dragleave', e => {
+                lane.classList.remove('drag-over');
+            });
+        });
+        // 移除全局 drop 事件，避免冒泡干扰
+
+        // == 表格Tracking#列右键菜单解绑PDF功能 ==
+        document.addEventListener('contextmenu', function(e) {
+            const td = e.target.closest('td[data-field="id"]');
+            if (td) {
+                e.preventDefault();
+                const tr = td.closest('tr');
+                const trkId = tr ? tr.dataset.id : null;
+                if (!trkId) return;
+                // 构建右键菜单
+                let menu = document.getElementById('pdfUnbindMenu');
+                if (menu) menu.remove();
+                menu = document.createElement('div');
+                menu.id = 'pdfUnbindMenu';
+                menu.style.position = 'absolute';
+                menu.style.left = e.pageX + 'px';
+                menu.style.top = e.pageY + 'px';
+                menu.style.background = '#fff';
+                menu.style.border = '1px solid #ddd';
+                menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                menu.style.zIndex = 9999;
+                menu.style.padding = '0';
+                menu.style.minWidth = '120px';
+                menu.style.fontSize = '15px';
+                menu.style.borderRadius = '6px';
+                menu.innerHTML = `<div style='padding:10px 18px;cursor:pointer;'>解绑PDF</div>`;
+                menu.firstChild.onclick = function() {
+                    unbindPdfFromSupabase(trkId);
+                    menu.remove();
+                };
+                document.body.appendChild(menu);
+                // 点击其他地方关闭菜单
+                setTimeout(() => {
+                    document.addEventListener('mousedown', function handler(ev) {
+                        if (!menu.contains(ev.target)) {
+                            menu.remove();
+                            document.removeEventListener('mousedown', handler);
+                        }
+                    });
+                }, 10);
+            }
+        });
+
+        // PDF转文本函数
+        async function pdfToText(arrayBuffer) {
+            if (!window.pdfjsLib) {
+                throw new Error('pdf.js 未加载');
+            }
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let text = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(item => item.str).join(' ') + '\n';
+            }
+            return text;
+        }
+
+        // == 优化PDF单号提取日志 ==
+        function extractOrderNumberFromPdfText(pdfText) {
+            const idx = pdfText.indexOf('Order Number');
+            if (idx !== -1) {
+                const snippet = pdfText.slice(idx, idx + 40);
+                console.log('Order Number字段原始片段:', snippet);
+                console.log('Order Number字段unicode:', snippet.split('').map(c => c.charCodeAt(0)));
+            } else {
+                console.log('未找到Order Number字段');
+            }
+            const orderNumRegex = /Order Number[:：]?\s*(TO[0-9A-Za-z]+)/i;
+            const match = pdfText.match(orderNumRegex);
+            console.log('正则匹配结果:', match);
+            if (match) return match[1];
+            const fallback = pdfText.match(/TO[0-9A-Za-z]{12,}/);
+            console.log('兜底正则匹配结果:', fallback);
+            return fallback ? fallback[0] : '';
         }
     </script>
 </body>
