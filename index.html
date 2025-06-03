@@ -501,7 +501,7 @@
                 status: "Pending",
                 pallets: 2,
                 type: "Delivery",
-                deliveryScope: "",
+                delivery_scope: "",
                 date: "25/12"
             },
             {
@@ -509,7 +509,7 @@
                 status: "In Transit",
                 pallets: 4,
                 type: "Pickup",
-                deliveryScope: "NSW",
+                delivery_scope: "NSW",
                 date: "30/11"
             },
             {
@@ -517,14 +517,14 @@
                 status: "Pending",
                 pallets: 1,
                 type: "Pickup",
-                deliveryScope: "VIC",
+                delivery_scope: "VIC",
                 date: "01/01"
             }
         ];
 
         // 数据验证函数
         function validateTask(task) {
-            const validScope = (task.type === 'Pickup') ? VALID_DELIVERY_SCOPES.includes(task.deliveryScope) : (!task.deliveryScope || task.deliveryScope === '');
+            const validScope = (task.type === 'Pickup') ? VALID_DELIVERY_SCOPES.includes(task.delivery_scope) : (!task.delivery_scope || task.delivery_scope === '');
             return VALID_STATUS.includes(task.status) &&
                    VALID_TYPES.includes(task.type) &&
                    validScope &&
@@ -666,16 +666,16 @@
                         type = 'Delivery';
                     }
 
-                    let deliveryScope = null;
+                    let delivery_scope = null;
                     // 只允许NSW/VIC/SA，且只要出现NSW/VIC/SA就为Pickup
                     if (/NSW/i.test(input)) {
-                        deliveryScope = 'NSW';
+                        delivery_scope = 'NSW';
                         type = 'Pickup';
                     } else if (/VIC/i.test(input)) {
-                        deliveryScope = 'VIC';
+                        delivery_scope = 'VIC';
                         type = 'Pickup';
                     } else if (/SA/i.test(input)) {
-                        deliveryScope = 'SA';
+                        delivery_scope = 'SA';
                         type = 'Pickup';
                     }
 
@@ -706,13 +706,13 @@
                             filterType = 'type';
                             value = 'Delivery';
                         } else if (/NSW/i.test(input)) {
-                            filterType = 'deliveryScope';
+                            filterType = 'delivery_scope';
                             value = 'NSW';
                         } else if (/VIC/i.test(input)) {
-                            filterType = 'deliveryScope';
+                            filterType = 'delivery_scope';
                             value = 'VIC';
                         } else if (/SA/i.test(input)) {
-                            filterType = 'deliveryScope';
+                            filterType = 'delivery_scope';
                             value = 'SA';
                         } else if (/在途|in transit/i.test(input)) {
                             filterType = 'status';
@@ -734,14 +734,14 @@
                         if (!id) missingFields.push('id');
                         if (!pallets) missingFields.push('pallets');
                         if (!type) missingFields.push('type');
-                        if (type === 'Pickup' && !deliveryScope) missingFields.push('deliveryScope');
+                        if (type === 'Pickup' && !delivery_scope) missingFields.push('delivery_scope');
                         if (!date) missingFields.push('date');
                     } else if (action === 'UPDATE_STATUS') {
                         if (!id) missingFields.push('id');
                         if (!status) missingFields.push('status');
                     } else if (action === 'UPDATE') {
                         if (!id) missingFields.push('id');
-                        if (!pallets && !type && !deliveryScope && !date) missingFields.push('updateField');
+                        if (!pallets && !type && !delivery_scope && !date) missingFields.push('updateField');
                     } else if (action === 'DELETE') {
                         if (!id) missingFields.push('id');
                     } else if (action === 'FILTER') {
@@ -754,7 +754,7 @@
                         id,
                         pallets,
                         type,
-                        deliveryScope,
+                        delivery_scope,
                         status,
                         date,
                         filterType,
@@ -775,7 +775,7 @@
                             model: "deepseek-chat",
                             messages: [{
                                 role: "system",
-                                content: `You are a logistics assistant. Your job is to extract structured JSON from user input in Chinese or English, for logistics task creation, update, delete, status update, or filtering.\nAll output must be in strict JSON, no explanation, no markdown, no code block.\nDo not generate or modify tracking numbers, just extract the original tracking number from user input as 'id'.\nIf you cannot extract all required fields, fill with null and add a 'missingFields' array listing missing ones.\n\nFor delivery scope:\n- Only allow deliveryScope to be one of [NSW, VIC, SA].\n- If user input mentions NSW/VIC/SA, type must be Pickup and deliveryScope must be the corresponding value.\n- If user input does not mention deliveryScope, set it to null.\n- If type is Delivery, deliveryScope must be null or empty.\n\nJSON format:\n{\n  "action": "CREATE/UPDATE_STATUS/UPDATE/DELETE/FILTER",\n  "id?": "原文中的单号",\n  "pallets?": number,\n  "type?": "Pickup/Delivery",\n  "deliveryScope?": "NSW/VIC/SA",\n  "status?": "Pending/In Transit/Completed/Issue",\n  "date?": "DD/MM或自然语言",\n  "filterType?": "status/type/deliveryScope",\n  "value?": "...",\n  "missingFields?": ["field1", ...]\n}\n\nExamples:\n- "明天TO1343124，10P自提NSW" -> {"action": "CREATE", "id": "TO1343124", "pallets": 10, "type": "Pickup", "deliveryScope": "NSW", "date": "明天", "missingFields": []}\n- "25号送2托盘" -> {"action": "CREATE", "pallets": 2, "type": "Delivery", "deliveryScope": null, "date": "25/xx", "missingFields": ["id"]}\n- "TRK001完成" -> {"action": "UPDATE_STATUS", "id": "TRK001", "status": "Completed", "missingFields": []}\n- "查找NSW的自提任务" -> {"action": "FILTER", "filterType": "deliveryScope", "value": "NSW", "missingFields": []}\n- "TRK002改为在途" -> {"action": "UPDATE_STATUS", "id": "TRK002", "status": "In Transit", "missingFields": []}\n- "新建3托盘Pickup到VIC 30/12" -> {"action": "CREATE", "pallets": 3, "type": "Pickup", "deliveryScope": "VIC", "date": "30/12", "missingFields": ["id"]}\n- "TO2452，10P下周一自提SA" -> {"action": "CREATE", "id": "TO2452", "pallets": 10, "type": "Pickup", "deliveryScope": "SA", "date": "下周一", "missingFields": []}\n- "删除TO2435546这个物流" -> {"action": "DELETE", "id": "TO2435546", "missingFields": []}\n- "修改TO2435546为明天自提VIC" -> {"action": "UPDATE", "id": "TO2435546", "date": "明天", "type": "Pickup", "deliveryScope": "VIC", "missingFields": []}\n- "TO2435546托盘数改为8" -> {"action": "UPDATE", "id": "TO2435546", "pallets": 8, "missingFields": []}`
+                                content: `You are a logistics assistant. Your job is to extract structured JSON from user input in Chinese or English, for logistics task creation, update, delete, status update, or filtering.\nAll output must be in strict JSON, no explanation, no markdown, no code block.\nDo not generate or modify tracking numbers, just extract the original tracking number from user input as 'id'.\nIf you cannot extract all required fields, fill with null and add a 'missingFields' array listing missing ones.\n\nFor delivery scope:\n- Only allow delivery_scope to be one of [NSW, VIC, SA].\n- If user input mentions NSW/VIC/SA, type must be Pickup and delivery_scope must be the corresponding value.\n- If user input does not mention delivery_scope, set it to null.\n- If type is Delivery, delivery_scope must be null or empty.\n\nJSON format:\n{\n  "action": "CREATE/UPDATE_STATUS/UPDATE/DELETE/FILTER",\n  "id?": "原文中的单号",\n  "pallets?": number,\n  "type?": "Pickup/Delivery",\n  "delivery_scope?": "NSW/VIC/SA",\n  "status?": "Pending/In Transit/Completed/Issue",\n  "date?": "DD/MM或自然语言",\n  "filterType?": "status/type/delivery_scope",\n  "value?": "...",\n  "missingFields?": ["field1", ...]\n}\n\nExamples:\n- "明天TO1343124，10P自提NSW" -> {"action": "CREATE", "id": "TO1343124", "pallets": 10, "type": "Pickup", "delivery_scope": "NSW", "date": "明天", "missingFields": []}\n- "25号送2托盘" -> {"action": "CREATE", "pallets": 2, "type": "Delivery", "delivery_scope": null, "date": "25/xx", "missingFields": ["id"]}\n- "TRK001完成" -> {"action": "UPDATE_STATUS", "id": "TRK001", "status": "Completed", "missingFields": []}\n- "查找NSW的自提任务" -> {"action": "FILTER", "filterType": "delivery_scope", "value": "NSW", "missingFields": []}\n- "TRK002改为在途" -> {"action": "UPDATE_STATUS", "id": "TRK002", "status": "In Transit", "missingFields": []}\n- "新建3托盘Pickup到VIC 30/12" -> {"action": "CREATE", "pallets": 3, "type": "Pickup", "delivery_scope": "VIC", "date": "30/12", "missingFields": ["id"]}\n- "TO2452，10P下周一自提SA" -> {"action": "CREATE", "id": "TO2452", "pallets": 10, "type": "Pickup", "delivery_scope": "SA", "date": "下周一", "missingFields": []}\n- "删除TO2435546这个物流" -> {"action": "DELETE", "id": "TO2435546", "missingFields": []}\n- "修改TO2435546为明天自提VIC" -> {"action": "UPDATE", "id": "TO2435546", "date": "明天", "type": "Pickup", "delivery_scope": "VIC", "missingFields": []}\n- "TO2435546托盘数改为8" -> {"action": "UPDATE", "id": "TO2435546", "pallets": 8, "missingFields": []}`
                             }, {
                                 role: "user",
                                 content: input
@@ -801,8 +801,8 @@
                         content = content.substring(firstBrace, lastBrace + 1);
                     }
                     const parsedContent = JSON.parse(content);
-                    // 本地修正：如果type为Delivery但deliveryScope为NSW/VIC/SA，自动修正为Pickup
-                    if (parsedContent.type === 'Delivery' && ['NSW','VIC','SA'].includes(parsedContent.deliveryScope)) {
+                    // 本地修正：如果type为Delivery但delivery_scope为NSW/VIC/SA，自动修正为Pickup
+                    if (parsedContent.type === 'Delivery' && ['NSW','VIC','SA'].includes(parsedContent.delivery_scope)) {
                         parsedContent.type = 'Pickup';
                     }
                     if (!parsedContent.action) {
@@ -855,16 +855,15 @@
                             const newTask = {
                                 id: userId || result.id || generateUniqueId(),
                                 status: result.status,
-                                pallets: result.pallets || '',
+                                pallets: Number(result.pallets) || 0,
                                 type: result.type || '',
-                                deliveryScope: result.deliveryScope || 'Local Delivery',
+                                delivery_scope: result.delivery_scope || '',
                                 date: parsedDate
                             };
-                            const tasks = safeGetTasks();
+                            // == 切换为 Supabase 数据流 ==
                             if (newTask.id) {
-                                tasks.push(newTask);
-                                localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
-                                triggerDataUpdate();
+                                await saveTaskToSupabase(newTask);
+                                await initializeDataSupabase(); // 刷新渲染
                                 if (validateTask(newTask)) {
                                     showChatMessage(`任务创建成功: ${newTask.id}`, 'assistant');
                                 } else {
@@ -896,7 +895,7 @@
 
         // 筛选和排序状态
         let currentSort = { field: null, asc: true };
-        let currentFilter = { status: '', type: '', deliveryScope: '' };
+        let currentFilter = { status: '', type: '', delivery_scope: '' };
 
         // == 表头筛选弹窗 ==
         function createHeaderDropdown(options, currentValue, onSelect) {
@@ -997,8 +996,8 @@
                             { label: 'NSW', value: 'NSW' },
                             { label: 'VIC', value: 'VIC' },
                             { label: 'SA', value: 'SA' }
-                        ], currentFilter.deliveryScope, (val) => {
-                            currentFilter.deliveryScope = val;
+                        ], currentFilter.delivery_scope, (val) => {
+                            currentFilter.delivery_scope = val;
                             renderTable();
                         });
                         dropdown.style.left = rect.left + 'px';
@@ -1033,8 +1032,8 @@
             if (currentFilter.type) {
                 tasks = tasks.filter(task => task.type === currentFilter.type);
             }
-            if (currentFilter.deliveryScope) {
-                tasks = tasks.filter(task => task.type === 'Pickup' && task.deliveryScope === currentFilter.deliveryScope);
+            if (currentFilter.delivery_scope) {
+                tasks = tasks.filter(task => task.type === 'Pickup' && task.delivery_scope === currentFilter.delivery_scope);
             }
             if (currentSort.field === 'date') {
                 tasks = tasks.slice().sort((a, b) => {
@@ -1050,7 +1049,7 @@
                 if (!task.id) return;
                 let status = VALID_STATUS.includes(task.status) ? task.status : 'Pending';
                 let type = VALID_TYPES.includes(task.type) ? task.type : 'Pickup';
-                let deliveryScope = (type === 'Pickup' && VALID_DELIVERY_SCOPES.includes(task.deliveryScope)) ? task.deliveryScope : '';
+                let delivery_scope = (type === 'Pickup' && VALID_DELIVERY_SCOPES.includes(task.delivery_scope)) ? task.delivery_scope : '';
                 const row = document.createElement('tr');
                 row.dataset.id = task.id;
                 row.dataset.status = status;
@@ -1076,7 +1075,7 @@
                     </td>
                     <td class="editable" data-field="pallets">${task.pallets || ''}</td>
                     <td class="editable" data-field="type">${type}</td>
-                    <td class="editable" data-field="deliveryScope">${type === 'Pickup' ? (deliveryScope || '') : ''}</td>
+                    <td class="editable" data-field="delivery_scope">${type === 'Pickup' ? (delivery_scope || '') : ''}</td>
                     <td class="editable" data-field="date">${task.date || ''}</td>
                     <td class="editable" data-field="notes">${task.notes || ''}</td>
                 `;
@@ -1160,9 +1159,9 @@
             const currentValue = cell.textContent.trim();
             if (cell.classList.contains('editing')) return;
             let input;
-            if (field === 'status' || field === 'type' || field === 'deliveryScope') {
-                // deliveryScope 只允许 type 为 Pickup 时可编辑
-                if (field === 'deliveryScope') {
+            if (field === 'status' || field === 'type' || field === 'delivery_scope') {
+                // delivery_scope 只允许 type 为 Pickup 时可编辑
+                if (field === 'delivery_scope') {
                     const rowType = row.querySelector('[data-field="type"]').textContent.trim();
                     if (rowType !== 'Pickup') {
                         // 不可编辑
@@ -1184,9 +1183,9 @@
                 input.addEventListener('change', () => {
                     const newValue = input.value;
                     const newData = { [field]: newValue };
-                    // 如果是type变为Delivery，自动清空deliveryScope
+                    // 如果是type变为Delivery，自动清空delivery_scope
                     if (field === 'type' && newValue === 'Delivery') {
-                        newData['deliveryScope'] = '';
+                        newData['delivery_scope'] = '';
                     }
                     updateTask(taskId, newData);
                     cell.classList.remove('editing');
@@ -1260,7 +1259,7 @@
             cell.classList.add('editing');
             input.focus();
             function finishEditing() {
-                if (field === 'status' || field === 'type' || field === 'deliveryScope') return;
+                if (field === 'status' || field === 'type' || field === 'delivery_scope') return;
                 const newValue = input.value.trim();
                 let isValid = true;
                 if (field === 'pallets' && (isNaN(newValue) || newValue < 1)) {
@@ -1301,7 +1300,7 @@
                     if (!task.id) return;
                     let status = VALID_STATUS.includes(task.status) ? task.status : 'Pending';
                     let type = VALID_TYPES.includes(task.type) ? task.type : 'Pickup';
-                    let deliveryScope = (type === 'Pickup' && VALID_DELIVERY_SCOPES.includes(task.deliveryScope)) ? task.deliveryScope : '';
+                    let delivery_scope = (type === 'Pickup' && VALID_DELIVERY_SCOPES.includes(task.delivery_scope)) ? task.delivery_scope : '';
                     const card = document.createElement('div');
                     card.className = 'kanban-card';
                     card.draggable = true;
@@ -1319,7 +1318,7 @@
                             </div>
                             <div class="info-row">
                                 <span class="info-label">Delivery Scope:</span>
-                                <span class="info-value">${type === 'Pickup' ? (deliveryScope || '') : ''}</span>
+                                <span class="info-value">${type === 'Pickup' ? (delivery_scope || '') : ''}</span>
                             </div>
                             <div class="info-row">
                                 <span class="info-label">Due Date:</span>
@@ -1354,31 +1353,31 @@
             }
         });
 
-        // 强化修复本地存储中所有任务的 deliveryScope 字段为标准值
+        // 强化修复本地存储中所有任务的 delivery_scope 字段为标准值
         function fixAllDeliveryScope() {
             let tasks = safeGetTasks();
             let changed = false;
             tasks.forEach(task => {
                 // 如果渲染出来是Local Delivery，但字段不是标准值，也修正
-                if (!task.deliveryScope || !VALID_DELIVERY_SCOPES.includes(task.deliveryScope)) {
-                    // 只要type为Delivery或Pickup，且deliveryScope不是Interstate Delivery，都修正为Local Delivery
+                if (!task.delivery_scope || !VALID_DELIVERY_SCOPES.includes(task.delivery_scope)) {
+                    // 只要type为Delivery或Pickup，且delivery_scope不是Interstate Delivery，都修正为Local Delivery
                     if (task.type === 'Delivery' || task.type === 'Pickup') {
-                        if (task.deliveryScope !== 'Interstate Delivery') {
-                            task.deliveryScope = 'Local Delivery';
+                        if (task.delivery_scope !== 'Interstate Delivery') {
+                            task.delivery_scope = 'Local Delivery';
                             changed = true;
                         }
                     }
                 } else {
                     // 兜底修正常见非标准写法
-                    let val = String(task.deliveryScope).trim().toLowerCase().replace(/\s+/g, ' ');
+                    let val = String(task.delivery_scope).trim().toLowerCase().replace(/\s+/g, ' ');
                     if (val === 'local delivery' || val === 'localdelivery' || val === '本地') {
-                        if (task.deliveryScope !== 'Local Delivery') {
-                            task.deliveryScope = 'Local Delivery';
+                        if (task.delivery_scope !== 'Local Delivery') {
+                            task.delivery_scope = 'Local Delivery';
                             changed = true;
                         }
                     } else if (val === 'interstate delivery' || val === 'interstatedelivery' || val === '跨州' || val === '洲际') {
-                        if (task.deliveryScope !== 'Interstate Delivery') {
-                            task.deliveryScope = 'Interstate Delivery';
+                        if (task.delivery_scope !== 'Interstate Delivery') {
+                            task.delivery_scope = 'Interstate Delivery';
                             changed = true;
                         }
                     }
@@ -1402,6 +1401,116 @@
                 localStorage.setItem('logisticsTasks', JSON.stringify(validTasks));
             }
         }
+
+        // == Supabase 数据优先的初始化和渲染 ==
+        async function initializeDataSupabase() {
+            let tasks = [];
+            try {
+                tasks = await loadTasksFromSupabase();
+            } catch (e) {
+                console.error('Supabase 拉取数据失败，尝试本地数据', e);
+            }
+            if (!tasks || tasks.length === 0) {
+                // Supabase 没有数据，自动写入 sampleTasks
+                for (const t of sampleTasks) {
+                    await saveTaskToSupabase(t);
+                }
+                tasks = [...sampleTasks];
+            }
+            renderTableSupabase(tasks);
+            renderKanbanSupabase(tasks);
+        }
+
+        // == 用 Supabase 数据渲染表格 ==
+        function renderTableSupabase(tasks) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            tasks.forEach(task => {
+                if (!task.id) return;
+                let status = VALID_STATUS.includes(task.status) ? task.status : 'Pending';
+                let type = VALID_TYPES.includes(task.type) ? task.type : 'Pickup';
+                let delivery_scope = (type === 'Pickup' && VALID_DELIVERY_SCOPES.includes(task.delivery_scope)) ? task.delivery_scope : '';
+                const row = document.createElement('tr');
+                row.dataset.id = task.id;
+                row.dataset.status = status;
+                const statusClass = status.toLowerCase().replace(' ', '-');
+                // PDF图标判断
+                // 这里可后续用 Supabase pdf_map
+                let pdfIconHtml = '';
+                pdfIconHtml = `<span class="pdf-upload-icon" data-id="${task.id}" title="Add PDF" style="cursor:pointer;font-size:20px;color:#888;margin-left:8px;vertical-align:middle;">+</span>`;
+                row.innerHTML = `
+                    <td class="editable" data-field="id">
+                        <span class="id-with-x">
+                            <button class="delete-task-x" data-id="${task.id}" title="Delete">×</button>
+                            <span>${task.id}</span>
+                            ${pdfIconHtml}
+                        </span>
+                    </td>
+                    <td class="editable" data-field="status">
+                        <span class="status-badge">${status}</span>
+                    </td>
+                    <td class="editable" data-field="pallets">${task.pallets || ''}</td>
+                    <td class="editable" data-field="type">${type}</td>
+                    <td class="editable" data-field="delivery_scope">${type === 'Pickup' ? (delivery_scope || '') : ''}</td>
+                    <td class="editable" data-field="date">${task.date || ''}</td>
+                    <td class="editable" data-field="notes">${task.notes || ''}</td>
+                `;
+                row.className = statusClass;
+                tbody.appendChild(row);
+            });
+            renderTableHeaderSortAndFilter();
+        }
+
+        // == 用 Supabase 数据渲染看板 ==
+        function renderKanbanSupabase(tasks) {
+            document.querySelectorAll('.swimlane').forEach(lane => {
+                const container = lane.querySelector('.cards-container');
+                container.innerHTML = '';
+                tasks.filter(task => (task.status === lane.dataset.status)).forEach(task => {
+                    if (!task.id) return;
+                    let status = VALID_STATUS.includes(task.status) ? task.status : 'Pending';
+                    let type = VALID_TYPES.includes(task.type) ? task.type : 'Pickup';
+                    let delivery_scope = (type === 'Pickup' && VALID_DELIVERY_SCOPES.includes(task.delivery_scope)) ? task.delivery_scope : '';
+                    const card = document.createElement('div');
+                    card.className = 'kanban-card';
+                    card.draggable = true;
+                    card.dataset.id = task.id;
+                    card.innerHTML = `
+                        <div class="card-header">${task.id}</div>
+                        <div class="card-body">
+                            <div class="info-row">
+                                <span class="info-label">Pallets:</span>
+                                <span class="info-value">${task.pallets || ''}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Type:</span>
+                                <span class="info-value">${type}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Delivery Scope:</span>
+                                <span class="info-value">${type === 'Pickup' ? (delivery_scope || '') : ''}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Due Date:</span>
+                                <span class="info-value due-date">${task.date || ''}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Notes:</span>
+                                <span class="info-value">${task.notes || ''}</span>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            });
+        }
+
+        // == 页面初始化时优先用 Supabase ==
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeDataSupabase();
+            // 其它初始化逻辑保留
+            // ... existing code ...
+        });
 
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
@@ -1675,9 +1784,9 @@
                                 const newTask = {
                                     id: t.orderNo || generateUniqueId(),
                                     status: 'Pending',
-                                    pallets: t.pallets || '',
+                                    pallets: Number(t.pallets) || 0,
                                     type: t.type || '',
-                                    deliveryScope: t.type === 'Pickup' ? (t.deliveryScope || '') : '',
+                                    delivery_scope: t.type === 'Pickup' ? (t.delivery_scope || '') : '',
                                     date: t.date || getTodayDateStr(),
                                     notes: t.notes || ''
                                 };
