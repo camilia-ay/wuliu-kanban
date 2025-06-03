@@ -559,15 +559,13 @@
         }
 
         // 统一更新方法
-        function updateTask(taskId, newData) {
-            const tasks = safeGetTasks();
+        async function updateTask(taskId, newData) {
+            let tasks = await loadTasksFromSupabase();
             const index = tasks.findIndex(t => t.id === taskId);
             if (index > -1) {
                 const updatedTask = { ...tasks[index], ...newData };
-                // 只要有id就允许保存
                 if (updatedTask.id) {
-                    tasks[index] = updatedTask;
-                    localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
+                    await saveTaskToSupabase(updatedTask);
                     triggerDataUpdate();
                     return true;
                 } else {
@@ -1340,15 +1338,21 @@
             e.preventDefault();
             const taskId = e.dataTransfer.getData('text/plain');
             const newStatus = e.target.closest('.swimlane')?.dataset.status;
-            
             if (newStatus) {
-                const success = await updateTask(taskId, { status: newStatus });
-                if (success) {
+                // 获取当前所有任务（从Supabase渲染的tasks）
+                let tasks = await loadTasksFromSupabase();
+                let task = tasks.find(t => t.id === taskId);
+                if (task) {
+                    task.status = newStatus;
+                    await saveTaskToSupabase(task);
+                    await initializeDataSupabase(); // 刷新页面
                     const lane = e.target.closest('.swimlane');
-                    lane.classList.add('updated');
-                    setTimeout(() => {
-                        lane.classList.remove('updated');
-                    }, 1000);
+                    if (lane) {
+                        lane.classList.add('updated');
+                        setTimeout(() => {
+                            lane.classList.remove('updated');
+                        }, 1000);
+                    }
                 }
             }
         });
@@ -1821,13 +1825,11 @@
         });
 
         // 监听删除按钮
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', async function(e) {
             if (e.target.classList.contains('delete-task-x')) {
                 const id = e.target.getAttribute('data-id');
-                if (confirm('Are you sure you want to delete this task?')) {
-                    let tasks = safeGetTasks();
-                    tasks = tasks.filter(t => t.id !== id);
-                    localStorage.setItem('logisticsTasks', JSON.stringify(tasks));
+                if (confirm('确定要删除这个任务吗？')) {
+                    await deleteTaskFromSupabase(id);
                     triggerDataUpdate();
                 }
             }
