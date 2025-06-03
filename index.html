@@ -2020,6 +2020,19 @@
                 triggerDataUpdate();
             })
             .subscribe();
+
+        // 恢复 localStorage 相关代码
+        // 安全的数据获取
+        function safeGetTasks() {
+            try {
+                return JSON.parse(localStorage.getItem('logisticsTasks')) || [];
+            } catch (error) {
+                console.error('数据损坏，正在重置...');
+                showError('数据损坏，正在重置...');
+                localStorage.removeItem('logisticsTasks');
+                return [];
+            }
+        }
     </script>
 </body>
 </html> 
