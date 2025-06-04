@@ -1706,52 +1706,47 @@
                                 aiContent = aiContent.substring(firstBracket, lastBracket + 1);
                             }
                             console.log('AI内容用于JSON.parse前:', aiContent);
-                            // AI内容解析后，强制转换为标准数组
+                            // AI内容解析后，强制转换为标准数组并修正结构
                             let tasks = [];
                             try {
-                                // 尝试标准JSON解析
                                 tasks = JSON.parse(aiContent);
                             } catch (e) {
+                                console.error('第一次JSON.parse失败:', e, 'aiContent:', aiContent);
                                 try {
-                                    // 容错：替换单引号为双引号，去除多余逗号
                                     let fixed = aiContent.replace(/'/g, '"').replace(/,\s*([}\]])/g, '$1');
                                     tasks = JSON.parse(fixed);
                                 } catch (e2) {
-                                    console.error('AI内容JSON.parse失败:', e2, aiContent);
+                                    console.error('AI内容JSON.parse失败:', e2, 'aiContent:', aiContent);
                                     showChatMessage('AI分析失败，请重试', 'error');
-                                    return;
+                                    return console.error('AI分析失败return，aiContent:', aiContent);
                                 }
                             }
-                            // 强制转换为标准数组
                             if (!Array.isArray(tasks)) {
                                 tasks = Object.values(tasks);
                             }
-                            console.log('AI解析后tasks类型:', typeof tasks, 'isArray:', Array.isArray(tasks), 'length:', tasks.length);
-                            // 自动处理所有日期字段，只保留DD/MM格式
-                            tasks.forEach(t => {
-                                if (t.date) {
-                                    // 匹配DD/MM或DD/MM/YYYY
-                                    const m = t.date.match(/(\d{2})\/(\d{2})(?:\/\d{4})?/);
-                                    if (m) t.date = `${m[1]}/${m[2]}`;
-                                }
-                            });
-                            if (!tasks.length) {
-                                showChatMessage('未能从图片中识别出有效任务', 'assistant');
-                                return;
-                            }
-                            window.pendingImageTasks = tasks.map(t => ({
-                                ...t,
-                                id: t.orderNo || t.id || generateUniqueId()
+                            console.log('AI解析后tasks类型:', typeof tasks, 'isArray:', Array.isArray(tasks), '内容:', tasks);
+                            const formattedTasks = tasks.map(t => ({
+                                id: t.orderNo || t.id || generateUniqueId(),
+                                status: 'Pending',
+                                pallets: Number(t.pallets) || 0,
+                                type: t.type || '',
+                                delivery_scope: t.type === 'Pickup' ? (t.delivery_scope || '') : '',
+                                date: t.date || getTodayDateStr(),
+                                notes: t.notes || ''
                             }));
-                            // 中文反馈
-                            let msg = '从图片中识别出以下任务：\n';
-                            tasks.forEach((t, i) => {
-                                msg += `#${i+1}: 单号: ${t.orderNo}, 类型: ${t.type}, 托盘数: ${t.pallets}, 日期: ${t.date}, 备注: ${t.notes}\n`;
-                            });
-                            msg += '这些识别出的任务是否正确？请回复"yes"确认或"no"取消。';
-                            showChatMessage(msg, 'assistant');
-                            // AI识别成功后赋值pendingImageTasks时加日志
-                            console.log('AI识别后pendingImageTasks:', window.pendingImageTasks);
+                            console.log('图片识别后待插入的formattedTasks:', formattedTasks);
+                            let successCount = 0, failCount = 0;
+                            for (const task of formattedTasks) {
+                                try {
+                                    await saveTaskToSupabase(task);
+                                    successCount++;
+                                } catch (err) {
+                                    console.error('单条插入失败:', err, task);
+                                    failCount++;
+                                }
+                            }
+                            showChatMessage(`图片识别批量任务创建完成，成功: ${successCount}，失败: ${failCount}`, 'assistant');
+                            await initializeDataSupabase();
                         } catch (err) {
                             console.error('图片识别或AI分析失败:', err);
                             showChatMessage('图片识别或AI分析失败: ' + err.message, 'error');
@@ -1775,37 +1770,21 @@
 
                         // 如果有待确认的图片识别任务
                         if (window.pendingImageTasks) {
-                            console.log('确认前pendingImageTasks:', window.pendingImageTasks);
+                            console.log('准备批量插入，pendingImageTasks:', window.pendingImageTasks, '类型:', typeof window.pendingImageTasks, 'isArray:', Array.isArray(window.pendingImageTasks), 'length:', window.pendingImageTasks.length);
                             if (input.toLowerCase() === 'yes') {
                                 console.log('确认时pendingImageTasks:', window.pendingImageTasks);
                                 let successCount = 0, failCount = 0;
-                                const insertPromises = [];
                                 for (const t of window.pendingImageTasks) {
                                     try {
-                                        const id = t.orderNo || t.id || generateUniqueId();
-                                        console.log('当前任务原始对象:', t, '最终用于插入的id:', id);
-                                        if (!id) {
-                                            failCount++;
-                                            continue;
-                                        }
-                                        const newTask = {
-                                            id,
-                                            status: 'Pending',
-                                            pallets: Number(t.pallets) || 0,
-                                            type: t.type || '',
-                                            delivery_scope: t.type === 'Pickup' ? (t.delivery_scope || '') : '',
-                                            date: t.date || getTodayDateStr(),
-                                            notes: t.notes || ''
-                                        };
+                                        const newTask = t;
                                         console.log('即将写入的newTask:', newTask);
-                                        insertPromises.push(saveTaskToSupabase(newTask));
+                                        await saveTaskToSupabase(newTask);
                                         successCount++;
                                     } catch (err) {
                                         console.error('批量插入任务出错:', err, t);
                                         failCount++;
                                     }
                                 }
-                                await Promise.all(insertPromises);
                                 console.log('批量插入循环结束');
                                 showChatMessage(`任务创建成功！成功: ${successCount}, 失败: ${failCount}`, 'assistant');
                                 window.pendingImageTasks = null;
@@ -2030,7 +2009,8 @@
                 .upsert(task)
                 .select();
             if (error) {
-                console.error('Error saving task:', error);
+                console.error('Error saving task:', error, 'task:', task);
+                showChatMessage('数据库写入失败: ' + error.message, 'error');
                 return null;
             }
             console.log('saveTaskToSupabase写入后返回:', data);
