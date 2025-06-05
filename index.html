@@ -1154,7 +1154,7 @@
         }
 
         // 修改表格编辑功能
-        document.getElementById('tableBody').addEventListener('click', (e) => {
+        document.getElementById('tableBody').addEventListener('click', async (e) => {
             const cell = e.target.closest('td.editable');
             if (!cell) return;
             const row = cell.closest('tr');
@@ -1163,7 +1163,67 @@
             const currentValue = cell.textContent.trim();
             if (cell.classList.contains('editing')) return;
             let input;
-            if (field === 'status' || field === 'type' || field === 'delivery_scope') {
+            if (field === 'id') {
+                // 单号可编辑，输入框宽度覆盖整个单元格，内容去除空格
+                const originalContent = cell.innerHTML;
+                const idSpan = cell.querySelector('span.id-with-x span');
+                const oldId = idSpan ? idSpan.textContent.trim() : currentValue.trim();
+                input = document.createElement('input');
+                input.type = 'text';
+                input.value = oldId;
+                input.placeholder = 'Tracking#';
+                input.maxLength = 32;
+                input.style.width = '100%';
+                input.style.boxSizing = 'border-box';
+                // 编辑时隐藏所有按钮
+                cell.innerHTML = '';
+                cell.appendChild(input);
+                cell.classList.add('editing');
+                input.focus();
+                input.select();
+                input.addEventListener('keydown', async (e2) => {
+                    if (e2.key === 'Enter') {
+                        const newId = input.value.trim();
+                        if (!newId) {
+                            showError('单号不能为空');
+                            return;
+                        }
+                        // 校验唯一性
+                        let tasks = await loadTasksFromSupabase();
+                        if (tasks.some(t => t.id === newId && t.id !== taskId)) {
+                            showError('单号已存在，不能重复');
+                            return;
+                        }
+                        // 获取原任务内容
+                        let task = tasks.find(t => t.id === taskId);
+                        if (task) {
+                            // 先删除原有id
+                            await deleteTaskFromSupabase(taskId);
+                            // 用新id插入新行（保留原有其他字段）
+                            const newTask = { ...task, id: newId };
+                            await saveTaskToSupabase(newTask);
+                            // 如果有PDF绑定，更新pdf_maps表
+                            const pdfMap = await getPdfMap();
+                            if (pdfMap[taskId]) {
+                                await deletePdfMapFromSupabase(taskId);
+                                await savePdfMapToSupabase(newId, pdfMap[taskId]);
+                            }
+                            await initializeDataSupabase();
+                        }
+                    } else if (e2.key === 'Escape') {
+                        cell.classList.remove('editing');
+                        cell.innerHTML = originalContent;
+                    }
+                });
+                input.addEventListener('blur', () => {
+                    setTimeout(() => {
+                        if (!cell.contains(document.activeElement)) {
+                            cell.classList.remove('editing');
+                            cell.innerHTML = originalContent;
+                        }
+                    }, 100);
+                });
+            } else if (field === 'status' || field === 'type' || field === 'delivery_scope') {
                 // delivery_scope 只允许 type 为 Pickup 时可编辑
                 if (field === 'delivery_scope') {
                     const rowType = row.querySelector('[data-field="type"]').textContent.trim();
@@ -2057,14 +2117,15 @@
         }
 
         async function savePdfMapToSupabase(trackingId, fileName) {
-            const id = generateUUID();
             const { error } = await supabase
                 .from('pdf_maps')
-                .upsert({
-                    id,
-                    tracking_id: trackingId,
-                    file_name: fileName
-                });
+                .upsert(
+                    {
+                        tracking_id: trackingId,
+                        file_name: fileName
+                    },
+                    { onConflict: 'tracking_id' } // 必须是字符串
+                );
             if (error) {
                 console.error('Error saving PDF map:', error);
                 return false;
