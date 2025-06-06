@@ -498,7 +498,7 @@
         // 常量定义
         const VALID_STATUS = ['Pending', 'In Transit', 'Completed'];
         const VALID_TYPES = ['Pickup', 'Delivery'];
-        const VALID_DELIVERY_SCOPES = ['NSW', 'VIC', 'SA'];
+        const VALID_DELIVERY_SCOPES = ['NSW', 'VIC', 'SA', 'QLD'];
 
         // 示例数据结构
         const sampleTasks = [
@@ -2121,8 +2121,8 @@
                 .from('pdf_maps')
                 .upsert(
                     {
-                        tracking_id: trackingId,
-                        file_name: fileName
+                    tracking_id: trackingId,
+                    file_name: fileName
                     },
                     { onConflict: 'tracking_id' } // 必须是字符串
                 );
